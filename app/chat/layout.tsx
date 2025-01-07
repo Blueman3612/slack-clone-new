@@ -1,25 +1,33 @@
-import { redirect } from 'next/navigation'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import Sidebar from '@/components/Sidebar'
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
+import { redirect } from "next/navigation";
+import ChannelList from "@/components/ChannelList";
+import UserList from "@/components/UserList";
 
 export default async function ChatLayout({
   children,
 }: {
-  children: React.ReactNode
+  children: React.ReactNode;
 }) {
-  const session = await getServerSession(authOptions)
-
-  if (!session) {
-    redirect('/')
+  const session = await getServerSession(authOptions);
+  
+  if (!session?.user) {
+    redirect("/login");
   }
 
   return (
-    <div className="flex h-screen">
-      <Sidebar currentUser={session.user} />
-      <main className="flex-1 overflow-y-auto">
-        {children}
-      </main>
-    </div>
-  )
+    <main className="flex h-screen">
+      <div className="w-64 bg-gray-100 dark:bg-gray-900 p-4 flex flex-col">
+        <div className="flex-1">
+          <h2 className="text-lg font-semibold mb-4">Channels</h2>
+          <ChannelList />
+        </div>
+        <div className="flex-1">
+          <h2 className="text-lg font-semibold mb-4">Direct Messages</h2>
+          <UserList currentUserId={session.user.id} />
+        </div>
+      </div>
+      {children}
+    </main>
+  );
 } 

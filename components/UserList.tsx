@@ -1,79 +1,56 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { pusherClient } from '@/lib/pusher';
-import Link from 'next/link';
 import { User } from '@prisma/client';
+import { pusherClient, isClient } from '@/lib/pusher';
+import UserItem from './UserItem';
 
 interface UserListProps {
-  currentUser?: User | null;
+  currentUserId: string;
 }
 
-export default function UserList({ currentUser }: UserListProps) {
+export default function UserList({ currentUserId }: UserListProps) {
   const [users, setUsers] = useState<User[]>([]);
 
   useEffect(() => {
-    if (!currentUser) return; // Don't subscribe if there's no current user
+    if (!isClient) return;
 
-    // Subscribe to presence channel for users
-    const channel = pusherClient.subscribe('presence-users');
+    // Fetch initial users
+    fetch('/api/users')
+      .then(res => res.json())
+      .then(data => setUsers(data.filter(user => user.id !== currentUserId)));
 
-    channel.bind('pusher:subscription_succeeded', (members: any) => {
-      console.log('Users subscription succeeded:', members);
-      const initialUsers = Object.values(members.members).map((member: any) => ({
-        id: member.id,
-        name: member.name,
-        email: member.email,
-      }));
-      setUsers(initialUsers);
+    // Subscribe to presence channel
+    const channel = pusherClient!.subscribe('presence-channel');
+
+    // When a user comes online
+    channel.bind('pusher:member_added', (member: { id: string; info: User }) => {
+      setUsers(prevUsers => {
+        if (prevUsers.find(user => user.id === member.info.id)) return prevUsers;
+        return [...prevUsers, member.info];
+      });
     });
 
-    channel.bind('pusher:member_added', (member: any) => {
-      console.log('Member added:', member);
-      setUsers(prev => [...prev, {
-        id: member.id,
-        name: member.info.name,
-        email: member.info.email,
-      }]);
+    // When a user goes offline
+    channel.bind('pusher:member_removed', (member: { id: string }) => {
+      setUsers(prevUsers => 
+        prevUsers.filter(user => user.id !== member.id)
+      );
     });
 
-    channel.bind('pusher:member_removed', (member: any) => {
-      console.log('Member removed:', member);
-      setUsers(prev => prev.filter(user => user.id !== member.id));
-    });
-
-    // Cleanup on unmount
     return () => {
-      pusherClient.unsubscribe('presence-users');
+      if (isClient) {
+        channel.unbind_all();
+        pusherClient!.unsubscribe('presence-channel');
+      }
     };
-  }, [currentUser]); // Add currentUser to dependency array
-
-  // Filter out the current user from the list, with null check
-  const otherUsers = currentUser 
-    ? users.filter(user => user.id !== currentUser.id)
-    : users;
+  }, [currentUserId]);
 
   return (
-    <div className="space-y-4">
-      <div className="mb-4">
-        <h2 className="text-xl font-semibold mb-2">Direct Messages</h2>
-        {otherUsers.length === 0 ? (
-          <p className="text-gray-500 text-sm">No other users online</p>
-        ) : (
-          <ul className="space-y-2">
-            {otherUsers.map(user => (
-              <li key={user.id}>
-                <Link
-                  href={`/chat?userId=${user.id}`}
-                  className="text-blue-500 hover:text-blue-700"
-                >
-                  {user.name || user.email?.split('@')[0] || 'Unknown User'}
-                </Link>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+    <div className="flex flex-col gap-2">
+      {users.map(user => (
+        <UserItem key={user.id} user={user} />
+      ))}
     </div>
   );
 } 

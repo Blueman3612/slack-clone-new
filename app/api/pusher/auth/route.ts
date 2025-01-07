@@ -1,49 +1,33 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
-import { pusher } from "@/lib/pusher";
+import { pusherServer } from "@/lib/pusher";
 import { authOptions } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
 
 export async function POST(request: Request) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session?.user?.email) {
+    if (!session?.user) {
       return new NextResponse("Unauthorized", { status: 401 });
     }
 
-    // Get the raw body text
-    const text = await request.text();
-    
-    // Parse the URL-encoded body manually
-    const params = new URLSearchParams(text);
-    const socketId = params.get('socket_id');
-    const channel = params.get('channel_name');
+    const data = await request.text();
+    const [socketId, channel] = data.split(":");
 
-    if (!socketId || !channel) {
-      return new NextResponse("Missing required fields", { status: 400 });
-    }
-
-    // Get the current user
-    const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
-    });
-
-    if (!user) {
-      return new NextResponse("User not found", { status: 404 });
-    }
-
-    // Prepare user data for Pusher
-    const userData = {
-      user_id: user.id,
+    const presenceData = {
+      user_id: session.user.id,
       user_info: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
+        id: session.user.id,
+        name: session.user.name,
+        email: session.user.email,
+        image: session.user.image,
       },
     };
 
-    // Generate auth response
-    const authResponse = pusher.authorizeChannel(socketId, channel, userData);
+    const authResponse = pusherServer.authorizeChannel(
+      socketId,
+      channel,
+      presenceData
+    );
 
     return NextResponse.json(authResponse);
   } catch (error) {

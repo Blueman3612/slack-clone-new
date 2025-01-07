@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { prisma } from "@/lib/prisma";
-import { pusher } from "@/lib/pusher";
+import { pusherServer } from "@/lib/pusher";
 import { authOptions } from "@/lib/auth";
 
 export async function POST(request: Request) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session?.user?.email) {
+    if (!session?.user) {
       return new NextResponse("Unauthorized", { status: 401 });
     }
 
@@ -15,57 +15,34 @@ export async function POST(request: Request) {
     const { content, channelId } = body;
 
     if (!content || !channelId) {
-      return new NextResponse("Missing required fields", { status: 400 });
+      return new NextResponse("Missing content or channelId", { status: 400 });
     }
 
-    // Get or create user with name
-    const user = await prisma.user.upsert({
-      where: { email: session.user.email },
-      update: {
-        name: session.user.name || 'Unknown User',
-      },
-      create: {
-        email: session.user.email,
-        name: session.user.name || 'Unknown User',
-      },
+    // Verify channel exists
+    const channel = await prisma.channel.findUnique({
+      where: { id: channelId },
     });
+
+    if (!channel) {
+      return new NextResponse("Channel not found", { status: 404 });
+    }
 
     // Create message
     const message = await prisma.message.create({
       data: {
         content,
-        userId: user.id,
+        userId: session.user.id,
         channelId,
       },
       include: {
-        user: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-          },
-        },
+        user: true,
       },
     });
 
-    const transformedMessage = {
-      ...message,
-      userName: message.user.name || message.user.email?.split('@')[0] || 'Unknown User',
-    };
-
     // Trigger Pusher event
-    try {
-      await pusher.trigger(
-        `presence-channel-${channelId}`,
-        'message:new',
-        transformedMessage
-      );
-    } catch (error) {
-      console.error('Pusher error:', error);
-      // Don't throw here - we still want to return the message even if Pusher fails
-    }
+    await pusherServer.trigger(`channel-${channelId}`, 'new-message', message);
 
-    return NextResponse.json(transformedMessage);
+    return NextResponse.json(message);
   } catch (error) {
     console.error("[MESSAGES_POST]", error);
     return new NextResponse("Internal Error", { status: 500 });
@@ -75,38 +52,26 @@ export async function POST(request: Request) {
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
-    const channelId = searchParams.get('channelId');
+    const channelId = searchParams.get("channelId");
 
     if (!channelId) {
-      return new NextResponse("Missing channelId", { status: 400 });
+      return new NextResponse("ChannelId is required", { status: 400 });
     }
 
     const messages = await prisma.message.findMany({
       where: {
         channelId,
-        parentId: null, // Only get top-level messages
-      },
-      include: {
-        user: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-          },
-        },
-        replies: true,
       },
       orderBy: {
-        createdAt: 'asc',
+        createdAt: 'desc',
       },
+      include: {
+        user: true,
+      },
+      take: 50, // Limit to last 50 messages
     });
 
-    const transformedMessages = messages.map(message => ({
-      ...message,
-      userName: message.user.name,
-    }));
-
-    return NextResponse.json(transformedMessages);
+    return NextResponse.json(messages.reverse());
   } catch (error) {
     console.error("[MESSAGES_GET]", error);
     return new NextResponse("Internal Error", { status: 500 });
