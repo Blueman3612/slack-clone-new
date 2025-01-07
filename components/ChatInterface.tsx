@@ -38,12 +38,6 @@ export default function ChatInterface({ chatId, chatType, currentUserId }: ChatI
   };
 
   useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
-
-  useEffect(() => {
-    if (!chatId || !isClient) return;
-
     const fetchMessages = async () => {
       try {
         const endpoint = chatType === 'channel'
@@ -56,6 +50,7 @@ export default function ChatInterface({ chatId, chatType, currentUserId }: ChatI
         }
         const data = await response.json();
         setMessages(data);
+        scrollToBottom();
       } catch (error) {
         console.error('Error fetching messages:', error);
       }
@@ -67,25 +62,26 @@ export default function ChatInterface({ chatId, chatType, currentUserId }: ChatI
       ? `channel-${chatId}`
       : `dm-${[currentUserId, chatId].sort().join('-')}`;
 
-    const channel = pusherClient!.subscribe(channelName);
-    
-    const seenMessageIds = new Set(messages.map(m => m.id));
+    const channel = pusherClient.subscribe(channelName);
     
     channel.bind('new-message', (newMessage: ExtendedMessage) => {
-      if (!seenMessageIds.has(newMessage.id)) {
-        setMessages(prev => {
-          if (prev.some(m => m.id === newMessage.id)) {
-            return prev;
-          }
-          return [...prev, newMessage];
-        });
-        seenMessageIds.add(newMessage.id);
-      }
+      setMessages((currentMessages) => {
+        if (currentMessages.some(m => m.id === newMessage.id)) {
+          return currentMessages;
+        }
+        
+        const updatedMessages = [...currentMessages, newMessage];
+        return updatedMessages.sort((a, b) => 
+          new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+        );
+      });
+      
+      setTimeout(scrollToBottom, 100);
     });
 
     return () => {
+      pusherClient.unsubscribe(channelName);
       channel.unbind_all();
-      pusherClient!.unsubscribe(channelName);
     };
   }, [chatId, chatType, currentUserId]);
 

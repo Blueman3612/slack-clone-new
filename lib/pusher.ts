@@ -10,22 +10,27 @@ console.log('Environment:', {
 });
 
 // Server-side Pusher instance
-export const pusherServer = typeof window === 'undefined' 
-  ? new PusherServer({
-      appId: process.env.PUSHER_APP_ID || '',
-      key: process.env.NEXT_PUBLIC_PUSHER_KEY || '',
-      secret: process.env.PUSHER_SECRET || '',
-      cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER || '',
-      useTLS: true,
-    })
-  : null;
+export const pusherServer = new PusherServer({
+  appId: process.env.PUSHER_APP_ID!,
+  key: process.env.NEXT_PUBLIC_PUSHER_KEY!,
+  secret: process.env.PUSHER_SECRET!,
+  cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER!,
+  useTLS: true,
+});
 
 // Client-side Pusher instance
-export const pusherClient = typeof window !== 'undefined'
-  ? new PusherClient(process.env.NEXT_PUBLIC_PUSHER_KEY || '', {
-      cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER || '',
-    })
-  : null;
+export const pusherClient = new PusherClient(
+  process.env.NEXT_PUBLIC_PUSHER_KEY!, {
+    cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER!,
+    authEndpoint: '/api/pusher/auth',
+    authTransport: 'ajax',
+    auth: {
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    },
+  }
+);
 
 // Helper function to check if we're on the client side
 export const isClient = typeof window !== 'undefined';
