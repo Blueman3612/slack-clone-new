@@ -1,75 +1,79 @@
 'use client';
 
-import { User } from '@prisma/client';
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { pusherClient } from '@/lib/pusher';
-import { Members } from 'pusher-js';
+import Link from 'next/link';
+import { User } from '@prisma/client';
 
 interface UserListProps {
-  initialUsers: User[];
-  currentUserId: string;
+  currentUser?: User | null;
 }
 
-export default function UserList({ initialUsers, currentUserId }: UserListProps) {
-  const [users, setUsers] = useState<{ [key: string]: any }>({});
-  const router = useRouter();
+export default function UserList({ currentUser }: UserListProps) {
+  const [users, setUsers] = useState<User[]>([]);
 
   useEffect(() => {
-    // Subscribe to presence channel
+    if (!currentUser) return; // Don't subscribe if there's no current user
+
+    // Subscribe to presence channel for users
     const channel = pusherClient.subscribe('presence-users');
 
-    channel.bind('pusher:subscription_succeeded', (members: Members) => {
-      console.log('Subscription succeeded with members:', members);
-      setUsers(members.members);
+    channel.bind('pusher:subscription_succeeded', (members: any) => {
+      console.log('Users subscription succeeded:', members);
+      const initialUsers = Object.values(members.members).map((member: any) => ({
+        id: member.id,
+        name: member.name,
+        email: member.email,
+      }));
+      setUsers(initialUsers);
     });
 
     channel.bind('pusher:member_added', (member: any) => {
       console.log('Member added:', member);
-      setUsers((currentUsers) => ({
-        ...currentUsers,
-        [member.id]: member.info
-      }));
+      setUsers(prev => [...prev, {
+        id: member.id,
+        name: member.info.name,
+        email: member.info.email,
+      }]);
     });
 
     channel.bind('pusher:member_removed', (member: any) => {
       console.log('Member removed:', member);
-      setUsers((currentUsers) => {
-        const newUsers = { ...currentUsers };
-        delete newUsers[member.id];
-        return newUsers;
-      });
+      setUsers(prev => prev.filter(user => user.id !== member.id));
     });
 
+    // Cleanup on unmount
     return () => {
       pusherClient.unsubscribe('presence-users');
     };
-  }, []);
+  }, [currentUser]); // Add currentUser to dependency array
 
-  const handleUserClick = (userId: string) => {
-    if (userId === currentUserId) return;
-    router.push(`/chat?userId=${userId}`);
-  };
+  // Filter out the current user from the list, with null check
+  const otherUsers = currentUser 
+    ? users.filter(user => user.id !== currentUser.id)
+    : users;
 
   return (
-    <div className="mt-8">
-      <h2 className="text-lg font-semibold text-white mb-4">Direct Messages</h2>
-      <ul>
-        {Object.entries(users)
-          .filter(([userId]) => userId !== currentUserId)
-          .map(([userId, userInfo]: [string, any]) => (
-            <li
-              key={userId}
-              onClick={() => handleUserClick(userId)}
-              className="flex items-center gap-2 p-2 rounded cursor-pointer hover:bg-gray-700"
-            >
-              <div className="flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-green-500" />
-                <span className="text-white">{userInfo.name}</span>
-              </div>
-            </li>
-          ))}
-      </ul>
+    <div className="space-y-4">
+      <div className="mb-4">
+        <h2 className="text-xl font-semibold mb-2">Direct Messages</h2>
+        {otherUsers.length === 0 ? (
+          <p className="text-gray-500 text-sm">No other users online</p>
+        ) : (
+          <ul className="space-y-2">
+            {otherUsers.map(user => (
+              <li key={user.id}>
+                <Link
+                  href={`/chat?userId=${user.id}`}
+                  className="text-blue-500 hover:text-blue-700"
+                >
+                  {user.name || user.email?.split('@')[0] || 'Unknown User'}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
   );
 } 

@@ -1,53 +1,53 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { pusher } from "@/lib/pusher";
+import { authOptions } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
 
 export async function POST(request: Request) {
   try {
     const session = await getServerSession(authOptions);
-
-    if (!session?.user) {
-      console.log("No session found in Pusher auth");
+    if (!session?.user?.email) {
       return new NextResponse("Unauthorized", { status: 401 });
     }
 
-    const formData = await request.formData();
-    const socketId = formData.get('socket_id');
-    const channel = formData.get('channel_name');
+    // Get the raw body text
+    const text = await request.text();
+    
+    // Parse the URL-encoded body manually
+    const params = new URLSearchParams(text);
+    const socketId = params.get('socket_id');
+    const channel = params.get('channel_name');
 
-    console.log("Authorizing channel:", {
-      socketId,
-      channel,
-      userId: session.user.id,
-      userName: session.user.name
-    });
-
-    const presenceData = {
-      user_id: session.user.id,
-      user_info: {
-        id: session.user.id,
-        name: session.user.name,
-        email: session.user.email
-      }
-    };
-
-    try {
-      const authResponse = pusher.authorizeChannel(
-        socketId as string,
-        channel as string,
-        presenceData
-      );
-      
-      console.log("Auth response:", authResponse);
-      return NextResponse.json(authResponse);
-    } catch (error) {
-      console.error("Pusher authorize error:", error);
-      return new NextResponse("Pusher authorization failed", { status: 500 });
+    if (!socketId || !channel) {
+      return new NextResponse("Missing required fields", { status: 400 });
     }
 
+    // Get the current user
+    const user = await prisma.user.findUnique({
+      where: { email: session.user.email },
+    });
+
+    if (!user) {
+      return new NextResponse("User not found", { status: 404 });
+    }
+
+    // Prepare user data for Pusher
+    const userData = {
+      user_id: user.id,
+      user_info: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+      },
+    };
+
+    // Generate auth response
+    const authResponse = pusher.authorizeChannel(socketId, channel, userData);
+
+    return NextResponse.json(authResponse);
   } catch (error) {
-    console.error("Pusher auth error:", error);
+    console.error("[PUSHER_AUTH]", error);
     return new NextResponse("Internal Error", { status: 500 });
   }
 }

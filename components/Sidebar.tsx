@@ -5,21 +5,14 @@ import UserList from './UserList';
 import ChannelList from './ChannelList';
 
 interface SidebarProps {
-  currentUser: User;
+  currentUser: User | null;
 }
 
-const Sidebar = ({ currentUser }: SidebarProps) => {
+export default function Sidebar({ currentUser }: SidebarProps) {
   return (
-    <div className="w-64 bg-gray-800 h-screen p-4">
-      <h1 className="text-xl font-bold text-white mb-6">Slack Clone</h1>
-      <ChannelList currentUser={currentUser} />
-      <UserList 
-        initialUsers={[]} 
-        currentUserId={currentUser.id}
-        onUserClick={() => {}}
-      />
+    <div className="w-64 bg-gray-800 text-white p-4">
+      <ChannelList />
+      <UserList currentUser={currentUser} />
     </div>
   );
-};
-
-export default Sidebar; 
+} 

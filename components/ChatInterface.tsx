@@ -10,6 +10,8 @@ import { DirectMessagesList } from './DirectMessagesList'
 import TypingIndicator from './TypingIndicator'
 import MessageBubble from './MessageBubble'
 import { useSearchParams } from 'next/navigation'
+import Thread from './Thread'
+import { MessageCircle } from 'lucide-react'
 
 type ChatType = 'channel' | 'direct'
 
@@ -39,6 +41,7 @@ export default function ChatInterface({
     [key: string]: { userId: string; name: string; timestamp: number }
   }>({})
   const [chatState, setChatState] = useState<ChatState>({ type: 'channel', target: null })
+  const [selectedThread, setSelectedThread] = useState<any>(null)
 
   // Add ref for messages container
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -107,27 +110,33 @@ export default function ChatInterface({
   useEffect(() => {
     if (!channelId && !userId) return;
 
-    const channelName = channelId 
-      ? `presence-channel-${channelId}`
-      : `private-dm-${[currentUser.id, userId].sort().join('-')}`;
+    const channelName = userId 
+      ? `private-dm-${currentUser.id}-${userId}`
+      : `presence-channel-${channelId}`;
 
     console.log('Subscribing to channel:', channelName);
+
     const channel = pusherClient.subscribe(channelName);
 
-    channel.bind('pusher:subscription_succeeded', (members: any) => {
-      console.log('Channel subscription succeeded:', members);
+    channel.bind('message:new', (message: Message) => {
+      console.log('Received new message:', message);
+      setMessages(prev => [...prev, message]);
     });
 
-    channel.bind('message:new', (message: any) => {
-      console.log('New message received via Pusher:', message);
-      setMessages((currentMessages) => [...currentMessages, message]);
+    // Bind to Pusher connection events
+    channel.bind('pusher:subscription_succeeded', () => {
+      console.log('Successfully subscribed to channel:', channelName);
+    });
+
+    channel.bind('pusher:subscription_error', (error: any) => {
+      console.error('Subscription error:', error);
     });
 
     return () => {
       console.log('Unsubscribing from channel:', channelName);
       pusherClient.unsubscribe(channelName);
     };
-  }, [channelId, userId, currentUser.id]);
+  }, [channelId, userId, currentUser]);
 
   const fetchMessages = async () => {
     if (!session?.user) return
@@ -171,35 +180,64 @@ export default function ChatInterface({
     return (
       <div
         key={message.id}
-        className={`flex ${isCurrentUser ? 'justify-end' : 'justify-start'} mb-4`}
+        className={`flex ${isCurrentUser ? 'justify-end' : 'justify-start'} mb-4 group`}
       >
-        <div className={`max-w-[70%] ${isCurrentUser ? 'bg-blue-500' : 'bg-gray-700'} rounded-lg p-3`}>
+        <div 
+          className={`
+            max-w-[70%] 
+            ${isCurrentUser ? 'bg-blue-500' : 'bg-gray-700'} 
+            rounded-lg p-3 
+            hover:bg-opacity-90 
+            transition-colors 
+            cursor-pointer
+          `}
+          onClick={() => setSelectedThread(message)}
+        >
           <div className="text-sm text-gray-300">{displayName}</div>
           <div className="text-white">{message.content}</div>
-          <div className="text-xs text-gray-400 mt-1">
-            {new Date(message.createdAt).toLocaleTimeString()}
+          <div className="text-xs text-gray-400 mt-1 flex items-center gap-2">
+            <span>{new Date(message.createdAt).toLocaleTimeString()}</span>
+            {message.replyCount > 0 ? (
+              <span className="flex items-center gap-1 text-blue-300">
+                <MessageCircle size={12} />
+                {message.replyCount} {message.replyCount === 1 ? 'reply' : 'replies'}
+              </span>
+            ) : (
+              <span className="text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity">
+                <MessageCircle size={12} />
+                Reply in thread
+              </span>
+            )}
           </div>
         </div>
       </div>
     );
   };
 
+  const isDirectMessage = searchParams.has('userId');
+  const receiverId = searchParams.get('userId');
+
   const sendMessage = async (content: string) => {
     try {
-      const endpoint = channelId 
-        ? '/api/messages' 
-        : '/api/direct-messages';
+      const endpoint = isDirectMessage ? '/api/direct-messages' : '/api/messages';
+      const payload = isDirectMessage 
+        ? {
+            content,
+            receiverId,
+          }
+        : {
+            content,
+            channelId: searchParams.get('channelId'),
+          };
+
+      console.log('Sending message with payload:', payload);
 
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          content,
-          channelId,
-          userId,
-        }),
+        body: JSON.stringify(payload),
       });
 
       if (!response.ok) {
@@ -224,10 +262,10 @@ export default function ChatInterface({
   }
 
   return (
-    <div className="flex-1 flex flex-col h-full">
+    <div className="relative h-screen flex flex-col">
       {/* Messages list */}
-      <div className="flex-1 overflow-y-auto p-4">
-        {messages.map((message) => renderMessage(message))}
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {messages.map(renderMessage)}
         {/* Add div for scroll reference */}
         <div ref={messagesEndRef} />
       </div>
@@ -255,16 +293,29 @@ export default function ChatInterface({
             scrollToBottom();
           }
         }} 
-        className="p-4 border-t"
+        className="p-4 border-t border-gray-700"
       >
         <input
           type="text"
           value={newMessage}
           onChange={handleInputChange}
-          placeholder="Type a message..."
-          className="w-full p-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+          placeholder={`Message ${channelId ? '#general' : userId}`}
+          className="flex-1 bg-gray-700 text-white rounded px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
+        <button
+          type="submit"
+          className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 transition-colors"
+        >
+          Send
+        </button>
       </form>
+
+      {selectedThread && (
+        <Thread 
+          parentMessage={selectedThread} 
+          onClose={() => setSelectedThread(null)} 
+        />
+      )}
     </div>
   )
 }

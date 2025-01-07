@@ -29,5 +29,8 @@
   "devDependencies": {
     "@types/bcrypt": "^5.0.2",
     "prisma": "^6.1.0"
+  },
+  "prisma": {
+    "seed": "ts-node --compiler-options {\"module\":\"CommonJS\"} prisma/seed.ts"
   }
 }

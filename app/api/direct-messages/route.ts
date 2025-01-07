@@ -64,26 +64,49 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session?.user) {
+    if (!session?.user?.email) {
       return new NextResponse("Unauthorized", { status: 401 });
     }
 
     const body = await request.json();
-    const { content, userId } = body;
+    const { content, receiverId } = body;
 
-    if (!content) {
-      return new NextResponse("Missing content", { status: 400 });
+    console.log('Received request with body:', body);
+
+    if (!content || !receiverId) {
+      return new NextResponse("Missing required fields", { status: 400 });
     }
 
-    if (!userId) {
-      return new NextResponse("Missing userId", { status: 400 });
+    // Get or create sender
+    const sender = await prisma.user.upsert({
+      where: { email: session.user.email },
+      update: {},
+      create: {
+        email: session.user.email,
+        name: session.user.name || 'Unknown User',
+      },
+    });
+
+    console.log('Sender found/created:', sender);
+
+    // Find receiver
+    const receiver = await prisma.user.findUnique({
+      where: { id: receiverId },
+    });
+
+    console.log('Receiver lookup result:', receiver);
+
+    if (!receiver) {
+      console.log('Receiver not found:', receiverId);
+      return new NextResponse("Receiver not found", { status: 404 });
     }
 
+    // Create the direct message
     const message = await prisma.directMessage.create({
       data: {
         content,
-        senderId: session.user.id,
-        receiverId: userId,
+        senderId: sender.id,
+        receiverId: receiver.id,
       },
       include: {
         sender: {
@@ -93,29 +116,19 @@ export async function POST(request: Request) {
             email: true,
           },
         },
-        receiver: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-          },
-        },
       },
     });
 
-    // Transform message to include correct user info
     const transformedMessage = {
       ...message,
-      user: message.sender,
       senderName: message.sender.name,
-      receiverName: message.receiver.name,
     };
 
-    // Get channel name in consistent order
-    const [id1, id2] = [session.user.id, userId].sort();
-    const channelName = `private-dm-${id1}-${id2}`;
+    // Trigger for both users' channels
+    const channelName = `private-dm-${sender.id}-${receiver.id}`;
+    const reverseChannelName = `private-dm-${receiver.id}-${sender.id}`;
     
-    await pusher.trigger(channelName, 'message:new', transformedMessage);
+    await pusher.trigger([channelName, reverseChannelName], 'message:new', transformedMessage);
 
     return NextResponse.json(transformedMessage);
   } catch (error) {
