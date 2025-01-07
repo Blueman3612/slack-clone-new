@@ -29,10 +29,17 @@ export default function ChatInterface({ chatId, chatType, currentUserId }: ChatI
   const [message, setMessage] = useState('')
   const [messages, setMessages] = useState<ExtendedMessage[]>([])
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const chatContainerRef = useRef<HTMLDivElement>(null)
 
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+    }
   };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
 
   useEffect(() => {
     if (!chatId || !isClient) return;
@@ -49,7 +56,6 @@ export default function ChatInterface({ chatId, chatType, currentUserId }: ChatI
         }
         const data = await response.json();
         setMessages(data);
-        scrollToBottom();
       } catch (error) {
         console.error('Error fetching messages:', error);
       }
@@ -62,12 +68,23 @@ export default function ChatInterface({ chatId, chatType, currentUserId }: ChatI
       : `dm-${[currentUserId, chatId].sort().join('-')}`;
 
     const channel = pusherClient!.subscribe(channelName);
-    channel.bind('new-message', (message: ExtendedMessage) => {
-      setMessages(prev => [...prev, message]);
-      scrollToBottom();
+    
+    const seenMessageIds = new Set(messages.map(m => m.id));
+    
+    channel.bind('new-message', (newMessage: ExtendedMessage) => {
+      if (!seenMessageIds.has(newMessage.id)) {
+        setMessages(prev => {
+          if (prev.some(m => m.id === newMessage.id)) {
+            return prev;
+          }
+          return [...prev, newMessage];
+        });
+        seenMessageIds.add(newMessage.id);
+      }
     });
 
     return () => {
+      channel.unbind_all();
       pusherClient!.unsubscribe(channelName);
     };
   }, [chatId, chatType, currentUserId]);
@@ -104,9 +121,12 @@ export default function ChatInterface({ chatId, chatType, currentUserId }: ChatI
   };
 
   return (
-    <div className="relative flex flex-col h-[calc(100vh-4rem)]">
-      <div className="absolute inset-0 overflow-y-auto pt-4 pb-20">
-        <div className="px-4 space-y-4">
+    <div className="relative flex flex-col h-screen">
+      <div 
+        ref={chatContainerRef}
+        className="absolute inset-0 overflow-y-auto pt-4 pb-20 bg-white dark:bg-gray-900"
+      >
+        <div className="px-4 space-y-4 mb-4">
           {messages.map((message) => (
             <div
               key={message.id}
@@ -119,8 +139,8 @@ export default function ChatInterface({ chatId, chatType, currentUserId }: ChatI
               <div
                 className={`max-w-[70%] rounded-lg p-3 ${
                   (message.userId === currentUserId || message.senderId === currentUserId)
-                    ? 'bg-blue-500 text-white'
-                    : 'bg-gray-200 dark:bg-gray-700'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-200 text-gray-900 dark:bg-gray-700 dark:text-white'
                 }`}
               >
                 <div className="font-bold text-sm mb-1">
@@ -130,11 +150,11 @@ export default function ChatInterface({ chatId, chatType, currentUserId }: ChatI
                     ? 'You'
                     : message.sender?.name || message.sender?.email?.split('@')[0]}
                 </div>
-                <div>{message.content}</div>
+                <div className="break-words">{message.content}</div>
               </div>
             </div>
           ))}
-          <div ref={messagesEndRef} />
+          <div ref={messagesEndRef} className="h-4" />
         </div>
       </div>
       <div className="absolute bottom-0 left-0 right-0 bg-white dark:bg-gray-800 border-t dark:border-gray-700">
@@ -144,7 +164,11 @@ export default function ChatInterface({ chatId, chatType, currentUserId }: ChatI
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             placeholder="Type a message..."
-            className="w-full p-2 rounded-lg border dark:border-gray-700 dark:bg-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full p-2 rounded-lg border dark:border-gray-600 
+                     bg-white dark:bg-gray-900 
+                     text-gray-900 dark:text-white
+                     placeholder-gray-500 dark:placeholder-gray-400
+                     focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </form>
       </div>

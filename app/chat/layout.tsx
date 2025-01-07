@@ -19,11 +19,11 @@ export default async function ChatLayout({
     <main className="flex h-screen">
       <div className="w-64 bg-gray-100 dark:bg-gray-900 p-4 flex flex-col">
         <div className="flex-1">
-          <h2 className="text-lg font-semibold mb-4">Channels</h2>
+          <h2 className="text-lg font-semibold mb-4 text-gray-900 dark:text-white">Channels</h2>
           <ChannelList />
         </div>
         <div className="flex-1">
-          <h2 className="text-lg font-semibold mb-4">Direct Messages</h2>
+          <h2 className="text-lg font-semibold mb-4 text-gray-900 dark:text-white">Direct Messages</h2>
           <UserList currentUserId={session.user.id} />
         </div>
       </div>
