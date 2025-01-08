@@ -18,7 +18,7 @@ export async function GET(request: Request) {
       return new NextResponse("User ID required", { status: 400 });
     }
 
-    // Ensure both users exist
+    // Verify both users exist
     const [currentUser, otherUser] = await Promise.all([
       prisma.user.findUnique({ where: { id: session.user.id } }),
       prisma.user.findUnique({ where: { id: userId } })
@@ -50,14 +50,6 @@ export async function GET(request: Request) {
             image: true,
           },
         },
-        receiver: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            image: true,
-          },
-        },
         reactions: {
           include: {
             user: {
@@ -76,8 +68,14 @@ export async function GET(request: Request) {
     });
 
     const transformedMessages = messages.map(message => ({
-      ...message,
+      id: message.id,
+      content: message.content,
+      createdAt: message.createdAt,
+      updatedAt: message.updatedAt,
+      userId: message.senderId,
       user: message.sender,
+      reactions: message.reactions,
+      replyCount: 0,
     }));
 
     return NextResponse.json(transformedMessages);
@@ -101,13 +99,13 @@ export async function POST(request: Request) {
       return new NextResponse("Missing content or receiverId", { status: 400 });
     }
 
-    // Ensure both users exist
-    const [sender, receiver] = await Promise.all([
+    // Verify both users exist
+    const [currentUser, receiver] = await Promise.all([
       prisma.user.findUnique({ where: { id: session.user.id } }),
       prisma.user.findUnique({ where: { id: receiverId } })
     ]);
 
-    if (!sender || !receiver) {
+    if (!currentUser || !receiver) {
       return new NextResponse("User not found", { status: 404 });
     }
 
@@ -126,23 +124,31 @@ export async function POST(request: Request) {
             image: true,
           },
         },
-        receiver: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            image: true,
+        reactions: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                image: true,
+              },
+            },
           },
         },
       },
     });
 
     const transformedMessage = {
-      ...message,
+      id: message.id,
+      content: message.content,
+      createdAt: message.createdAt,
+      updatedAt: message.updatedAt,
+      userId: message.senderId,
       user: message.sender,
+      reactions: message.reactions,
+      replyCount: 0,
     };
 
-    // Trigger Pusher event with consistent channel name
     const channelName = `dm-${[session.user.id, receiverId].sort().join('-')}`;
     await pusherServer.trigger(channelName, 'new-message', transformedMessage);
 

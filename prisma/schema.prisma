@@ -67,19 +67,16 @@ model Message {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   userId    String
-  channelId String
+  channelId String?
   user      User     @relation(fields: [userId], references: [id])
-  channel   Channel  @relation(fields: [channelId], references: [id])
-  
-  parentId  String?  // ID of the parent message if this is a reply
-  parent    Message? @relation("ThreadReplies", fields: [parentId], references: [id])
-  replies   Message[] @relation("ThreadReplies")
-  
+  channel   Channel? @relation(fields: [channelId], references: [id])
   reactions Reaction[]
-  
-  @@index([userId])
-  @@index([channelId])
-  @@index([parentId])
+
+  // Thread fields
+  isThreadStarter Boolean @default(false)
+  threadId        String?
+  parentMessage   Message?  @relation("ThreadMessages", fields: [threadId], references: [id])
+  threadMessages  Message[] @relation("ThreadMessages")
 }
 
 model Channel {
@@ -92,18 +89,21 @@ model Channel {
 }
 
 model DirectMessage {
-  id        String    @id @default(cuid())
+  id        String   @id @default(cuid())
   content   String
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  sender    User      @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
   senderId  String
-  receiver  User      @relation("ReceivedMessages", fields: [receiverId], references: [id], onDelete: Cascade)
   receiverId String
+  sender    User     @relation("SentMessages", fields: [senderId], references: [id])
+  receiver  User     @relation("ReceivedMessages", fields: [receiverId], references: [id])
   reactions Reaction[]
 
-  @@index([senderId])
-  @@index([receiverId])
+  // Add these new fields for threads
+  isThreadStarter Boolean @default(false)
+  threadId        String?
+  parentMessage   DirectMessage?  @relation("ThreadMessages", fields: [threadId], references: [id])
+  threadMessages  DirectMessage[] @relation("ThreadMessages")
 }
 
 model Reaction {

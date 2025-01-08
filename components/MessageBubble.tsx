@@ -1,133 +1,188 @@
-import { memo, useState } from 'react';
-import { Smile } from 'lucide-react';
-import axios from 'axios';
-import type { Reaction } from '@/types';
-import UserAvatar from './UserAvatar';
+'use client'
 
-interface MessageBubbleProps {
-  message: {
-    id: string;
-    content: string;
-    reactions?: Reaction[];
-    user?: {
-      id: string;
-      name?: string;
-      email?: string;
-      image?: string | null;
-    };
+import { useState } from 'react'
+import { formatDistanceToNow } from 'date-fns'
+import { Message, Reaction } from '@prisma/client'
+import { useSession } from 'next-auth/react'
+import EmojiPicker from './EmojiPicker'
+import { MessageSquare } from 'lucide-react'
+import Image from 'next/image'
+
+interface ExtendedMessage extends Message {
+  user?: {
+    name: string;
+    email: string;
+    image?: string | null;
   };
-  isOwn: boolean;
-  onlineUsers?: Set<string>;
+  sender?: {
+    name: string;
+    email: string;
+    image?: string | null;
+  };
+  receiver?: {
+    name: string;
+    email: string;
+  };
+  reactions?: (Reaction & {
+    user: {
+      id: string;
+      name: string | null;
+      image: string | null;
+    };
+  })[];
+  replyCount?: number;
+  isThreadStarter?: boolean;
 }
 
-const COMMON_EMOJIS = ['👍', '❤️', '😂', '🎉', '🤔', '👀'];
+interface MessageBubbleProps {
+  message: ExtendedMessage;
+  isOwn: boolean;
+  onlineUsers?: Set<string>;
+  onThreadClick?: () => void;
+  showThread?: boolean;
+}
 
-const MessageBubble = memo(function MessageBubble({ message, isOwn, onlineUsers = new Set() }: MessageBubbleProps) {
-  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
-  const displayName = message.user?.name || message.user?.email?.split('@')[0] || 'Anonymous';
-  const isOnline = message.user?.id ? onlineUsers.has(message.user.id) : false;
+export default function MessageBubble({ 
+  message, 
+  isOwn, 
+  onlineUsers,
+  onThreadClick,
+  showThread = true 
+}: MessageBubbleProps) {
+  const { data: session } = useSession()
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false)
 
-  const handleReactionClick = async (emoji: string) => {
+  const userName = message.user?.name || message.sender?.name || 'Unknown User'
+  const userImage = message.user?.image || message.sender?.image || '/default-avatar.png'
+  const isOnline = onlineUsers?.has(message.userId || message.senderId || '')
+
+  console.log("Message data:", {
+    id: message.id,
+    replyCount: message.replyCount,
+    showThread,
+    hasReplies: message.replyCount > 0
+  });
+
+  const handleReaction = async (emoji: string) => {
     try {
-      const isDirectMessage = 'senderId' in message;
-      const endpoint = isDirectMessage 
-        ? `/api/direct-messages/${message.id}/reactions`
-        : `/api/messages/${message.id}/reactions`;
-        
-      await axios.post(endpoint, { emoji });
-      setShowEmojiPicker(false);
-    } catch (error) {
-      console.error('Failed to add reaction:', error);
-    }
-  };
+      const response = await fetch('/api/messages/reaction', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messageId: message.id,
+          emoji,
+        }),
+      })
 
-  const reactionCounts = message.reactions?.reduce((acc, reaction) => {
-    acc[reaction.emoji] = (acc[reaction.emoji] || 0) + 1;
-    return acc;
-  }, {} as Record<string, number>) || {};
+      if (!response.ok) {
+        throw new Error('Failed to add reaction')
+      }
+
+      setShowEmojiPicker(false)
+    } catch (error) {
+      console.error('Error adding reaction:', error)
+    }
+  }
+
+  const handleRemoveReaction = async (reactionId: string) => {
+    try {
+      const response = await fetch(`/api/messages/reaction/${reactionId}`, {
+        method: 'DELETE',
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to remove reaction')
+      }
+    } catch (error) {
+      console.error('Error removing reaction:', error)
+    }
+  }
 
   return (
-    <div className="flex items-start space-x-3 group px-4 py-1 hover:bg-gray-50 dark:hover:bg-gray-800/50">
-      <UserAvatar
-        image={message.user?.image}
-        name={displayName}
-        isOnline={isOnline}
-      />
+    <div className="flex items-start space-x-3 group px-4 py-2 hover:bg-gray-50 dark:hover:bg-gray-800">
+      <div className="relative flex-shrink-0">
+        <Image
+          src={userImage}
+          alt={userName}
+          width={36}
+          height={36}
+          className="rounded-md"
+        />
+        {isOnline && (
+          <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white dark:border-gray-900 rounded-full"></div>
+        )}
+      </div>
 
-      {/* Message content */}
-      <div className="flex-grow min-w-0">
-        {/* Header */}
+      <div className="flex-1 min-w-0">
         <div className="flex items-center space-x-2">
-          <span className="font-medium text-sm text-gray-900 dark:text-gray-100">
-            {displayName}
-          </span>
-          <span className="text-xs text-gray-500 dark:text-gray-400">
-            {new Date(message.createdAt).toLocaleTimeString([], { 
-              hour: '2-digit', 
-              minute: '2-digit' 
-            })}
+          <span className="font-medium text-sm">{userName}</span>
+          <span className="text-xs text-gray-500">
+            {formatDistanceToNow(new Date(message.createdAt), { addSuffix: true })}
           </span>
         </div>
 
-        {/* Message text */}
-        <div className="mt-0.5 text-sm text-gray-800 dark:text-gray-200">
+        <p className="text-sm text-gray-900 dark:text-gray-100 whitespace-pre-wrap">
           {message.content}
-        </div>
+        </p>
 
         {/* Reactions */}
-        {Object.keys(reactionCounts).length > 0 && (
+        {message.reactions && message.reactions.length > 0 && (
           <div className="flex flex-wrap gap-1 mt-2">
-            {Object.entries(reactionCounts).map(([emoji, count]) => (
+            {message.reactions.map((reaction) => (
               <button
-                key={emoji}
-                onClick={() => handleReactionClick(emoji)}
-                className="inline-flex items-center px-2 py-0.5 rounded-full 
-                         text-xs border border-gray-200 dark:border-gray-700 
-                         bg-white dark:bg-gray-800
-                         text-gray-700 dark:text-gray-300
-                         hover:bg-gray-100 dark:hover:bg-gray-700 
-                         transition-colors duration-200"
+                key={reaction.id}
+                onClick={() => handleRemoveReaction(reaction.id)}
+                className="inline-flex items-center px-2 py-1 rounded-full text-xs
+                  bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600"
               >
-                {emoji} {count}
+                {reaction.emoji} <span className="ml-1">{reaction.user.name}</span>
               </button>
             ))}
           </div>
         )}
+
+        {/* Thread indicator */}
+        {showThread && message.replyCount > 0 && (
+          <div className="mt-1">
+            <button 
+              onClick={onThreadClick}
+              className="text-xs inline-flex items-center gap-1.5 text-blue-600 hover:text-blue-700 
+                       dark:text-blue-400 dark:hover:text-blue-300 hover:underline"
+            >
+              <MessageSquare className="w-3.5 h-3.5" />
+              <span>{message.replyCount} {message.replyCount === 1 ? 'reply' : 'replies'}</span>
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* Reaction button */}
-      <button
-        onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-        className="opacity-0 group-hover:opacity-100 transition-opacity 
-                   p-1.5 rounded-full 
-                   text-gray-500 dark:text-gray-400
-                   hover:bg-gray-100 dark:hover:bg-gray-700"
-      >
-        <Smile className="w-4 h-4" />
-      </button>
+      {/* Action buttons */}
+      <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center space-x-2">
+        <button
+          onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+          className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+        >
+          😀
+        </button>
+        
+        {showThread && (
+          <button
+            onClick={onThreadClick}
+            className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+            title="Reply in thread"
+          >
+            <MessageSquare className="w-4 h-4" />
+          </button>
+        )}
+      </div>
 
-      {/* Emoji picker */}
       {showEmojiPicker && (
-        <div className="absolute ml-12 mt-8 
-                      bg-white dark:bg-gray-800 
-                      shadow-lg rounded-lg p-2 z-10 
-                      border border-gray-200 dark:border-gray-700">
-          <div className="grid grid-cols-3 gap-2">
-            {COMMON_EMOJIS.map(emoji => (
-              <button
-                key={emoji}
-                onClick={() => handleReactionClick(emoji)}
-                className="hover:bg-gray-100 dark:hover:bg-gray-700 
-                         p-2 rounded text-xl transition-colors duration-200"
-              >
-                {emoji}
-              </button>
-            ))}
-          </div>
+        <div className="absolute z-50 mt-10">
+          <EmojiPicker onEmojiSelect={handleReaction} />
         </div>
       )}
     </div>
-  );
-});
-
-export default MessageBubble; 
+  )
+} 

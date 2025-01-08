@@ -7,16 +7,19 @@ import { Message, User, Reaction } from '@prisma/client'
 import MessageBubble from './MessageBubble'
 import { useOnlineUsers } from '@/contexts/OnlineUsersContext'
 import TypingIndicator from './TypingIndicator'
+import ThreadView from './ThreadView'
 import axios from 'axios'
 
 interface ExtendedMessage extends Message {
   user?: {
     name: string;
     email: string;
+    image?: string | null;
   };
   sender?: {
     name: string;
     email: string;
+    image?: string | null;
   };
   receiver?: {
     name: string;
@@ -29,17 +32,25 @@ interface ExtendedMessage extends Message {
       image: string | null;
     };
   })[];
+  replyCount?: number;
+  isThreadStarter?: boolean;
 }
 
 interface ChatInterfaceProps {
   chatId: string;
   chatType: 'channel' | 'dm';
   currentUserId: string;
+  initialMessages: ExtendedMessage[];
 }
 
-export default function ChatInterface({ chatId, chatType, currentUserId }: ChatInterfaceProps) {
+export default function ChatInterface({ 
+  chatId, 
+  chatType, 
+  currentUserId, 
+  initialMessages = []
+}: ChatInterfaceProps) {
   const { data: session } = useSession();
-  const [messages, setMessages] = useState<ExtendedMessage[]>([]);
+  const [messages, setMessages] = useState<ExtendedMessage[]>(initialMessages);
   const [message, setMessage] = useState('');
   const [typingUsers, setTypingUsers] = useState<string[]>([]);
   const { onlineUsers } = useOnlineUsers();
@@ -47,6 +58,9 @@ export default function ChatInterface({ chatId, chatType, currentUserId }: ChatI
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const currentChannelRef = useRef<string | null>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout>();
+  const [selectedThread, setSelectedThread] = useState<ExtendedMessage | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // Add this function to handle typing events
   const handleTyping = async () => {
@@ -92,6 +106,8 @@ export default function ChatInterface({ chatId, chatType, currentUserId }: ChatI
     if (!chatId) return;
 
     const fetchMessages = async () => {
+      setIsLoading(true);
+      setError(null);
       try {
         const endpoint = chatType === 'channel'
           ? `/api/messages?channelId=${chatId}`
@@ -108,6 +124,9 @@ export default function ChatInterface({ chatId, chatType, currentUserId }: ChatI
         }
       } catch (error) {
         console.error('Error fetching messages:', error);
+        setError('Failed to load messages');
+      } finally {
+        setIsLoading(false);
       }
     };
 
@@ -244,43 +263,78 @@ export default function ChatInterface({ chatId, chatType, currentUserId }: ChatI
     }
   };
 
+  // Add thread click handler
+  const handleThreadClick = (message: ExtendedMessage) => {
+    setSelectedThread(message);
+  };
+
   return (
-    <div className="relative flex flex-col h-screen">
-      <div 
-        ref={chatContainerRef}
-        className="absolute inset-0 overflow-y-auto pt-4 pb-20 bg-white dark:bg-gray-900"
-      >
-        <div className="px-4 space-y-4 mb-4">
-          {messages.map((message) => (
-            <MessageBubble
-              key={message.id}
-              message={message}
-              isOwn={message.userId === currentUserId || message.senderId === currentUserId}
-              onlineUsers={onlineUsers}
+    <div className="flex h-full">
+      <div className="flex-1 flex flex-col h-full relative">
+        {/* Messages container */}
+        <div 
+          ref={chatContainerRef}
+          className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-600"
+        >
+          {error && (
+            <div className="p-4 text-red-500 text-center">
+              {error}
+            </div>
+          )}
+          {isLoading ? (
+            <div className="p-4 text-center">
+              Loading messages...
+            </div>
+          ) : (
+            <div className="py-4">
+              {messages?.map((message) => (
+                <MessageBubble
+                  key={message.id}
+                  message={message}
+                  isOwn={message.userId === currentUserId || message.senderId === currentUserId}
+                  onlineUsers={onlineUsers}
+                  onThreadClick={() => setSelectedThread(message)}
+                />
+              ))}
+              <div ref={messagesEndRef} />
+            </div>
+          )}
+        </div>
+
+        {/* Fixed bottom input container */}
+        <div className="sticky bottom-0 left-0 right-0 bg-white dark:bg-gray-900 border-t dark:border-gray-700">
+          <TypingIndicator typingUsers={typingUsers} />
+          <form onSubmit={handleSubmit} className="p-4">
+            <input
+              type="text"
+              value={message}
+              onChange={(e) => {
+                setMessage(e.target.value);
+                handleTyping();
+              }}
+              placeholder="Type a message..."
+              className="w-full p-3 rounded-lg border dark:border-gray-600 
+                       bg-white dark:bg-gray-800 
+                       text-gray-900 dark:text-white
+                       placeholder-gray-500 dark:placeholder-gray-400
+                       focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
-          ))}
-          <div ref={messagesEndRef} className="h-4" />
+          </form>
         </div>
       </div>
-      <div className="absolute bottom-0 left-0 right-0 bg-white dark:bg-gray-800 border-t dark:border-gray-700">
-        <TypingIndicator typingUsers={typingUsers} />
-        <form onSubmit={handleSubmit} className="p-4">
-          <input
-            type="text"
-            value={message}
-            onChange={(e) => {
-              setMessage(e.target.value);
-              handleTyping();
-            }}
-            placeholder="Type a message..."
-            className="w-full p-2 rounded-lg border dark:border-gray-600 
-                     bg-white dark:bg-gray-900 
-                     text-gray-900 dark:text-white
-                     placeholder-gray-500 dark:placeholder-gray-400
-                     focus:outline-none focus:ring-2 focus:ring-blue-500"
+
+      {/* Thread sidebar */}
+      {selectedThread && (
+        <div className="w-[400px] border-l border-gray-200 dark:border-gray-700">
+          <ThreadView
+            parentMessage={selectedThread}
+            onClose={() => setSelectedThread(null)}
+            chatType={chatType}
+            chatId={chatId}
+            currentUserId={currentUserId}
           />
-        </form>
-      </div>
+        </div>
+      )}
     </div>
-  )
+  );
 } 

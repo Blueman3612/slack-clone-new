@@ -18,15 +18,6 @@ export async function POST(request: Request) {
       return new NextResponse("Missing content or channelId", { status: 400 });
     }
 
-    // Verify channel exists
-    const channel = await prisma.channel.findUnique({
-      where: { id: channelId },
-    });
-
-    if (!channel) {
-      return new NextResponse("Channel not found", { status: 404 });
-    }
-
     // Create message
     const message = await prisma.message.create({
       data: {
@@ -35,7 +26,25 @@ export async function POST(request: Request) {
         channelId,
       },
       include: {
-        user: true,
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            image: true,
+          },
+        },
+        reactions: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                image: true,
+              },
+            },
+          },
+        },
       },
     });
 
@@ -66,6 +75,7 @@ export async function GET(request: Request) {
     const messages = await prisma.message.findMany({
       where: {
         channelId,
+        threadId: null,
       },
       include: {
         user: {
@@ -93,7 +103,33 @@ export async function GET(request: Request) {
       },
     });
 
-    return NextResponse.json(messages);
+    // Get thread counts in a separate query
+    const threadCounts = await prisma.message.groupBy({
+      by: ['threadId'],
+      where: {
+        NOT: {
+          threadId: null,
+        },
+      },
+      _count: {
+        _all: true,
+      }
+    });
+
+    // Create a map of threadId -> count
+    const threadCountMap = new Map(
+      threadCounts.map(t => [t.threadId, t._count._all])
+    );
+
+    console.log('Thread counts:', threadCountMap);
+
+    const messagesWithThreadInfo = messages.map(message => ({
+      ...message,
+      replyCount: threadCountMap.get(message.id) || 0,
+      isThreadStarter: (threadCountMap.get(message.id) || 0) > 0
+    }));
+
+    return NextResponse.json(messagesWithThreadInfo);
   } catch (error) {
     console.error("[MESSAGES_GET]", error);
     return new NextResponse("Internal Error", { status: 500 });
