@@ -1,12 +1,13 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { formatDistanceToNow } from 'date-fns'
 import { Message, Reaction } from '@prisma/client'
 import { useSession } from 'next-auth/react'
 import EmojiPicker from './EmojiPicker'
 import { MessageSquare } from 'lucide-react'
 import Image from 'next/image'
+import { pusherClient } from '@/lib/pusher'
 
 interface ExtendedMessage extends Message {
   user?: {
@@ -40,6 +41,7 @@ interface MessageBubbleProps {
   onlineUsers?: Set<string>;
   onThreadClick?: () => void;
   showThread?: boolean;
+  channelId?: string;
 }
 
 export default function MessageBubble({ 
@@ -47,10 +49,34 @@ export default function MessageBubble({
   isOwn, 
   onlineUsers,
   onThreadClick,
-  showThread = true 
+  showThread = true,
+  channelId
 }: MessageBubbleProps) {
   const { data: session } = useSession()
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
+  const [replyCount, setReplyCount] = useState(message.replyCount || 0)
+
+  useEffect(() => {
+    if (!channelId) return;
+
+    const channel = pusherClient.subscribe(`channel-${channelId}`);
+
+    channel.bind('update-thread', (data: { 
+      messageId: string; 
+      replyCount: number; 
+      isThreadStarter: boolean;
+    }) => {
+      if (data.messageId === message.id) {
+        console.log(`Updating reply count for message ${message.id} to ${data.replyCount}`);
+        setReplyCount(data.replyCount);
+      }
+    });
+
+    return () => {
+      channel.unbind('update-thread');
+      pusherClient.unsubscribe(`channel-${channelId}`);
+    };
+  }, [channelId, message.id]);
 
   const userName = message.user?.name || message.sender?.name || 'Unknown User'
   const userImage = message.user?.image || message.sender?.image || '/default-avatar.png'
@@ -144,7 +170,7 @@ export default function MessageBubble({
         )}
 
         {/* Thread indicator */}
-        {showThread && message.replyCount > 0 && (
+        {showThread && replyCount > 0 && (
           <div className="mt-1">
             <button 
               onClick={onThreadClick}
@@ -152,7 +178,7 @@ export default function MessageBubble({
                        dark:text-blue-400 dark:hover:text-blue-300 hover:underline"
             >
               <MessageSquare className="w-3.5 h-3.5" />
-              <span>{message.replyCount} {message.replyCount === 1 ? 'reply' : 'replies'}</span>
+              <span>{replyCount} {replyCount === 1 ? 'reply' : 'replies'}</span>
             </button>
           </div>
         )}

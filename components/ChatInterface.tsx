@@ -294,6 +294,8 @@ export default function ChatInterface({
                   isOwn={message.userId === currentUserId || message.senderId === currentUserId}
                   onlineUsers={onlineUsers}
                   onThreadClick={() => setSelectedThread(message)}
+                  channelId={chatId}
+                  chatType={chatType}
                 />
               ))}
               <div ref={messagesEndRef} />
@@ -325,7 +327,7 @@ export default function ChatInterface({
 
       {/* Thread sidebar */}
       {selectedThread && (
-        <div className="w-[400px] border-l border-gray-200 dark:border-gray-700">
+        <div className="flex-shrink-0 overflow-hidden border-l border-gray-200 dark:border-gray-700">
           <ThreadView
             parentMessage={selectedThread}
             onClose={() => setSelectedThread(null)}
