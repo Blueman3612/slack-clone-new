@@ -51,27 +51,48 @@ export async function POST(request: Request) {
 
 export async function GET(request: Request) {
   try {
+    const session = await getServerSession(authOptions);
+    if (!session?.user) {
+      return new NextResponse("Unauthorized", { status: 401 });
+    }
+
     const { searchParams } = new URL(request.url);
     const channelId = searchParams.get("channelId");
 
     if (!channelId) {
-      return new NextResponse("ChannelId is required", { status: 400 });
+      return new NextResponse("Channel ID required", { status: 400 });
     }
 
     const messages = await prisma.message.findMany({
       where: {
         channelId,
       },
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
+        reactions: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                image: true,
+              },
+            },
+          },
+        },
+      },
       orderBy: {
         createdAt: 'desc',
       },
-      include: {
-        user: true,
-      },
-      take: 50, // Limit to last 50 messages
     });
 
-    return NextResponse.json(messages.reverse());
+    return NextResponse.json(messages);
   } catch (error) {
     console.error("[MESSAGES_GET]", error);
     return new NextResponse("Internal Error", { status: 500 });

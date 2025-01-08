@@ -53,22 +53,51 @@ export async function GET(request: Request) {
     const userId = searchParams.get("userId");
 
     if (!userId) {
-      return new NextResponse("UserId is required", { status: 400 });
+      return new NextResponse("User ID required", { status: 400 });
     }
 
     const messages = await prisma.directMessage.findMany({
       where: {
         OR: [
-          { senderId: session.user.id, receiverId: userId },
-          { senderId: userId, receiverId: session.user.id },
+          {
+            senderId: session.user.id,
+            receiverId: userId,
+          },
+          {
+            senderId: userId,
+            receiverId: session.user.id,
+          },
         ],
+      },
+      include: {
+        sender: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
+        receiver: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
+        reactions: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                image: true,
+              },
+            },
+          },
+        },
       },
       orderBy: {
         createdAt: 'asc',
-      },
-      include: {
-        sender: true,
-        receiver: true,
       },
     });
 

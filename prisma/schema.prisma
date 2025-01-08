@@ -23,6 +23,7 @@ model User {
   channels        Channel[] @relation("ChannelMembers")
   sentMessages     DirectMessage[] @relation("SentMessages")
   receivedMessages DirectMessage[] @relation("ReceivedMessages")
+  reactions       Reaction[]
 }
 
 model Account {
@@ -74,6 +75,8 @@ model Message {
   parent    Message? @relation("ThreadReplies", fields: [parentId], references: [id])
   replies   Message[] @relation("ThreadReplies")
   
+  reactions Reaction[]
+  
   @@index([userId])
   @@index([channelId])
   @@index([parentId])
@@ -89,17 +92,35 @@ model Channel {
 }
 
 model DirectMessage {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   content   String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  sender    User      @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
   senderId  String
-  sender    User     @relation("SentMessages", fields: [senderId], references: [id])
-  
+  receiver  User      @relation("ReceivedMessages", fields: [receiverId], references: [id], onDelete: Cascade)
   receiverId String
-  receiver   User     @relation("ReceivedMessages", fields: [receiverId], references: [id])
+  reactions Reaction[]
 
   @@index([senderId])
   @@index([receiverId])
+}
+
+model Reaction {
+  id        String   @id @default(cuid())
+  emoji     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  message   Message?  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  messageId String?
+  directMessage DirectMessage? @relation(fields: [directMessageId], references: [id], onDelete: Cascade)
+  directMessageId String?
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+
+  @@index([messageId])
+  @@index([directMessageId])
+  @@index([userId])
 } 

@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { pusherClient, isClient } from '@/lib/pusher'
-import { Message, User } from '@prisma/client'
+import { Message, User, Reaction } from '@prisma/client'
+import MessageBubble from './MessageBubble'
 
 interface ExtendedMessage extends Message {
   user?: {
@@ -17,6 +18,13 @@ interface ExtendedMessage extends Message {
     name: string;
     email: string;
   };
+  reactions?: (Reaction & {
+    user: {
+      id: string;
+      name: string | null;
+      image: string | null;
+    };
+  })[];
 }
 
 interface ChatInterfaceProps {
@@ -69,14 +77,41 @@ export default function ChatInterface({ chatId, chatType, currentUserId }: ChatI
         if (currentMessages.some(m => m.id === newMessage.id)) {
           return currentMessages;
         }
-        
-        const updatedMessages = [...currentMessages, newMessage];
-        return updatedMessages.sort((a, b) => 
-          new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-        );
+        return [...currentMessages, newMessage];
       });
-      
-      setTimeout(scrollToBottom, 100);
+      scrollToBottom();
+    });
+
+    channel.bind('message-reaction', (data: {
+      messageId: string;
+      reaction: Reaction & {
+        user: {
+          id: string;
+          name: string | null;
+          image: string | null;
+        };
+      };
+      type: 'add' | 'remove';
+    }) => {
+      setMessages((currentMessages) =>
+        currentMessages.map((msg) => {
+          if (msg.id === data.messageId) {
+            const reactions = msg.reactions || [];
+            if (data.type === 'add') {
+              return {
+                ...msg,
+                reactions: [...reactions, data.reaction],
+              };
+            } else {
+              return {
+                ...msg,
+                reactions: reactions.filter(r => r.id !== data.reaction.id),
+              };
+            }
+          }
+          return msg;
+        })
+      );
     });
 
     return () => {
@@ -124,31 +159,11 @@ export default function ChatInterface({ chatId, chatType, currentUserId }: ChatI
       >
         <div className="px-4 space-y-4 mb-4">
           {messages.map((message) => (
-            <div
+            <MessageBubble
               key={message.id}
-              className={`flex ${
-                (message.userId === currentUserId || message.senderId === currentUserId)
-                  ? 'justify-end'
-                  : 'justify-start'
-              }`}
-            >
-              <div
-                className={`max-w-[70%] rounded-lg p-3 ${
-                  (message.userId === currentUserId || message.senderId === currentUserId)
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-200 text-gray-900 dark:bg-gray-700 dark:text-white'
-                }`}
-              >
-                <div className="font-bold text-sm mb-1">
-                  {chatType === 'channel'
-                    ? message.user?.name || message.user?.email?.split('@')[0]
-                    : message.senderId === currentUserId
-                    ? 'You'
-                    : message.sender?.name || message.sender?.email?.split('@')[0]}
-                </div>
-                <div className="break-words">{message.content}</div>
-              </div>
-            </div>
+              message={message}
+              isOwn={message.userId === currentUserId || message.senderId === currentUserId}
+            />
           ))}
           <div ref={messagesEndRef} className="h-4" />
         </div>
