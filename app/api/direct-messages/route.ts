@@ -4,61 +4,6 @@ import { prisma } from "@/lib/prisma";
 import { pusherServer } from "@/lib/pusher";
 import { authOptions } from "@/lib/auth";
 
-export async function POST(request: Request) {
-  try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user) {
-      return new NextResponse("Unauthorized", { status: 401 });
-    }
-
-    const body = await request.json();
-    const { content, receiverId } = body;
-
-    if (!content || !receiverId) {
-      return new NextResponse("Missing content or receiverId", { status: 400 });
-    }
-
-    const message = await prisma.directMessage.create({
-      data: {
-        content,
-        senderId: session.user.id,
-        receiverId,
-      },
-      include: {
-        sender: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            image: true,
-          },
-        },
-        receiver: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            image: true,
-          },
-        },
-      },
-    });
-
-    const transformedMessage = {
-      ...message,
-      user: message.sender,
-    };
-
-    const channelName = `dm-${[session.user.id, receiverId].sort().join('-')}`;
-    await pusherServer.trigger(channelName, 'new-message', transformedMessage);
-
-    return NextResponse.json(transformedMessage);
-  } catch (error) {
-    console.error("[DIRECT_MESSAGES_POST]", error);
-    return new NextResponse("Internal Error", { status: 500 });
-  }
-}
-
 export async function GET(request: Request) {
   try {
     const session = await getServerSession(authOptions);
@@ -71,6 +16,16 @@ export async function GET(request: Request) {
 
     if (!userId) {
       return new NextResponse("User ID required", { status: 400 });
+    }
+
+    // Ensure both users exist
+    const [currentUser, otherUser] = await Promise.all([
+      prisma.user.findUnique({ where: { id: session.user.id } }),
+      prisma.user.findUnique({ where: { id: userId } })
+    ]);
+
+    if (!currentUser || !otherUser) {
+      return new NextResponse("User not found", { status: 404 });
     }
 
     const messages = await prisma.directMessage.findMany({
@@ -128,6 +83,72 @@ export async function GET(request: Request) {
     return NextResponse.json(transformedMessages);
   } catch (error) {
     console.error("[DIRECT_MESSAGES_GET]", error);
+    return new NextResponse("Internal Error", { status: 500 });
+  }
+}
+
+export async function POST(request: Request) {
+  try {
+    const session = await getServerSession(authOptions);
+    if (!session?.user) {
+      return new NextResponse("Unauthorized", { status: 401 });
+    }
+
+    const body = await request.json();
+    const { content, receiverId } = body;
+
+    if (!content || !receiverId) {
+      return new NextResponse("Missing content or receiverId", { status: 400 });
+    }
+
+    // Ensure both users exist
+    const [sender, receiver] = await Promise.all([
+      prisma.user.findUnique({ where: { id: session.user.id } }),
+      prisma.user.findUnique({ where: { id: receiverId } })
+    ]);
+
+    if (!sender || !receiver) {
+      return new NextResponse("User not found", { status: 404 });
+    }
+
+    const message = await prisma.directMessage.create({
+      data: {
+        content,
+        senderId: session.user.id,
+        receiverId,
+      },
+      include: {
+        sender: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            image: true,
+          },
+        },
+        receiver: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            image: true,
+          },
+        },
+      },
+    });
+
+    const transformedMessage = {
+      ...message,
+      user: message.sender,
+    };
+
+    // Trigger Pusher event with consistent channel name
+    const channelName = `dm-${[session.user.id, receiverId].sort().join('-')}`;
+    await pusherServer.trigger(channelName, 'new-message', transformedMessage);
+
+    return NextResponse.json(transformedMessage);
+  } catch (error) {
+    console.error("[DIRECT_MESSAGES_POST]", error);
     return new NextResponse("Internal Error", { status: 500 });
   }
 } 

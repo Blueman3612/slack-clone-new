@@ -1,8 +1,8 @@
 import { memo, useState } from 'react';
-import { Smile, User } from 'lucide-react';
+import { Smile } from 'lucide-react';
 import axios from 'axios';
 import type { Reaction } from '@/types';
-import Image from 'next/image';
+import UserAvatar from './UserAvatar';
 
 interface MessageBubbleProps {
   message: {
@@ -17,13 +17,15 @@ interface MessageBubbleProps {
     };
   };
   isOwn: boolean;
+  onlineUsers?: Set<string>;
 }
 
 const COMMON_EMOJIS = ['👍', '❤️', '😂', '🎉', '🤔', '👀'];
 
-const MessageBubble = memo(function MessageBubble({ message, isOwn }: MessageBubbleProps) {
+const MessageBubble = memo(function MessageBubble({ message, isOwn, onlineUsers = new Set() }: MessageBubbleProps) {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const displayName = message.user?.name || message.user?.email?.split('@')[0] || 'Anonymous';
+  const isOnline = message.user?.id ? onlineUsers.has(message.user.id) : false;
 
   const handleReactionClick = async (emoji: string) => {
     try {
@@ -46,22 +48,11 @@ const MessageBubble = memo(function MessageBubble({ message, isOwn }: MessageBub
 
   return (
     <div className="flex items-start space-x-3 group px-4 py-1 hover:bg-gray-50 dark:hover:bg-gray-800/50">
-      {/* Avatar */}
-      <div className="flex-shrink-0 w-10 h-10 rounded-full overflow-hidden">
-        {message.user?.image ? (
-          <Image
-            src={message.user.image}
-            alt={displayName}
-            width={40}
-            height={40}
-            className="rounded-full"
-          />
-        ) : (
-          <div className="w-full h-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
-            <User className="w-6 h-6 text-gray-500 dark:text-gray-400" />
-          </div>
-        )}
-      </div>
+      <UserAvatar
+        image={message.user?.image}
+        name={displayName}
+        isOnline={isOnline}
+      />
 
       {/* Message content */}
       <div className="flex-grow min-w-0">

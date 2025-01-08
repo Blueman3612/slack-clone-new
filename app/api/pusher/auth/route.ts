@@ -10,21 +10,17 @@ export async function POST(request: Request) {
       return new NextResponse("Unauthorized", { status: 401 });
     }
 
-    const body = await request.text();
-    const [socketId, channel] = body.split(":");
+    const data = await request.text();
+    const [socketId, channel] = data.split('&').map(str => str.split('=')[1]);
 
-    const authResponse = pusherServer.authorizeChannel(
-      socketId,
-      channel,
-      {
-        user_id: session.user.id,
-        user_info: {
-          name: session.user.name,
-          email: session.user.email,
-          image: session.user.image,
-        },
-      }
-    );
+    const authResponse = pusherServer.authorizeChannel(socketId, channel, {
+      user_id: session.user.id,
+      user_info: {
+        name: session.user.name,
+        email: session.user.email,
+        image: session.user.image,
+      },
+    });
 
     return NextResponse.json(authResponse);
   } catch (error) {

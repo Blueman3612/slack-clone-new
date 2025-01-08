@@ -20,15 +20,11 @@ export const pusherServer = new PusherServer({
 
 // Client-side Pusher instance
 export const pusherClient = new PusherClient(
-  process.env.NEXT_PUBLIC_PUSHER_KEY!, {
+  process.env.NEXT_PUBLIC_PUSHER_KEY!,
+  {
     cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER!,
     authEndpoint: '/api/pusher/auth',
-    authTransport: 'ajax',
-    auth: {
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    },
+    forceTLS: true,
   }
 );
 

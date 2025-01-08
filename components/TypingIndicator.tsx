@@ -1,19 +1,30 @@
-import React from 'react';
+import { memo } from 'react';
 
 interface TypingIndicatorProps {
-  name: string;
+  typingUsers: string[];
 }
 
-export default function TypingIndicator({ name }: TypingIndicatorProps) {
+const TypingIndicator = memo(function TypingIndicator({ typingUsers }: TypingIndicatorProps) {
+  if (typingUsers.length === 0) return null;
+
+  const text = typingUsers.length === 1
+    ? `${typingUsers[0]} is typing...`
+    : typingUsers.length === 2
+    ? `${typingUsers[0]} and ${typingUsers[1]} are typing...`
+    : `${typingUsers[0]} and ${typingUsers.length - 1} others are typing...`;
+
   return (
-    <div className="text-sm text-gray-600 flex items-center gap-2">
-      <span className="font-medium">{name}</span>
-      <span className="text-gray-500">is typing</span>
-      <span className="flex gap-1">
-        <span className="animate-bounce delay-0">.</span>
-        <span className="animate-bounce delay-100">.</span>
-        <span className="animate-bounce delay-200">.</span>
-      </span>
+    <div className="px-4 py-2 text-sm text-gray-500 dark:text-gray-400">
+      <div className="flex items-center space-x-2">
+        <div className="flex space-x-1">
+          <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce [animation-delay:-0.3s]" />
+          <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce [animation-delay:-0.15s]" />
+          <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" />
+        </div>
+        <span>{text}</span>
+      </div>
     </div>
   );
-} 
+});
+
+export default TypingIndicator; 
