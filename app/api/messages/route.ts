@@ -73,6 +73,7 @@ export async function GET(request: Request) {
             id: true,
             name: true,
             email: true,
+            image: true,
           },
         },
         reactions: {
@@ -88,7 +89,7 @@ export async function GET(request: Request) {
         },
       },
       orderBy: {
-        createdAt: 'desc',
+        createdAt: 'asc',
       },
     });
 

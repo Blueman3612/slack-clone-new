@@ -34,16 +34,24 @@ interface ChatInterfaceProps {
 }
 
 export default function ChatInterface({ chatId, chatType, currentUserId }: ChatInterfaceProps) {
-  const [message, setMessage] = useState('')
-  const [messages, setMessages] = useState<ExtendedMessage[]>([])
-  const messagesEndRef = useRef<HTMLDivElement>(null)
-  const chatContainerRef = useRef<HTMLDivElement>(null)
+  const [messages, setMessages] = useState<ExtendedMessage[]>([]);
+  const [message, setMessage] = useState('');
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
     if (chatContainerRef.current) {
-      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+      const { scrollHeight } = chatContainerRef.current;
+      chatContainerRef.current.scrollTo({
+        top: scrollHeight,
+        behavior: 'smooth'
+      });
     }
   };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
 
   useEffect(() => {
     const fetchMessages = async () => {
@@ -58,7 +66,6 @@ export default function ChatInterface({ chatId, chatType, currentUserId }: ChatI
         }
         const data = await response.json();
         setMessages(data);
-        scrollToBottom();
       } catch (error) {
         console.error('Error fetching messages:', error);
       }
@@ -79,7 +86,6 @@ export default function ChatInterface({ chatId, chatType, currentUserId }: ChatI
         }
         return [...currentMessages, newMessage];
       });
-      scrollToBottom();
     });
 
     channel.bind('message-reaction', (data: {
@@ -125,24 +131,26 @@ export default function ChatInterface({ chatId, chatType, currentUserId }: ChatI
     if (!message.trim()) return;
 
     try {
-      console.log('Sending message:', { chatType, chatId, message });
-
-      const endpoint = chatType === 'channel' ? '/api/messages' : '/api/direct-messages';
-      const body = chatType === 'channel' 
-        ? { content: message, channelId: chatId }
-        : { content: message, receiverId: chatId };
+      const endpoint = chatType === 'channel'
+        ? '/api/messages'
+        : '/api/direct-messages';
 
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          content: message,
+          ...(chatType === 'channel' 
+            ? { channelId: chatId }
+            : { receiverId: chatId }
+          ),
+        }),
       });
 
       if (!response.ok) {
-        const error = await response.text();
-        throw new Error(`Failed to send message: ${error}`);
+        throw new Error('Failed to send message');
       }
 
       setMessage('');

@@ -15,10 +15,9 @@ export async function POST(request: Request) {
     const { content, receiverId } = body;
 
     if (!content || !receiverId) {
-      return new NextResponse("Content and receiverId are required", { status: 400 });
+      return new NextResponse("Missing content or receiverId", { status: 400 });
     }
 
-    // Create the direct message
     const message = await prisma.directMessage.create({
       data: {
         content,
@@ -26,16 +25,34 @@ export async function POST(request: Request) {
         receiverId,
       },
       include: {
-        sender: true,
-        receiver: true,
+        sender: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            image: true,
+          },
+        },
+        receiver: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            image: true,
+          },
+        },
       },
     });
 
-    // Trigger Pusher event for DM
-    const channelName = `dm-${[session.user.id, receiverId].sort().join('-')}`;
-    await pusherServer?.trigger(channelName, 'new-message', message);
+    const transformedMessage = {
+      ...message,
+      user: message.sender,
+    };
 
-    return NextResponse.json(message);
+    const channelName = `dm-${[session.user.id, receiverId].sort().join('-')}`;
+    await pusherServer.trigger(channelName, 'new-message', transformedMessage);
+
+    return NextResponse.json(transformedMessage);
   } catch (error) {
     console.error("[DIRECT_MESSAGES_POST]", error);
     return new NextResponse("Internal Error", { status: 500 });
@@ -75,6 +92,7 @@ export async function GET(request: Request) {
             id: true,
             name: true,
             email: true,
+            image: true,
           },
         },
         receiver: {
@@ -82,6 +100,7 @@ export async function GET(request: Request) {
             id: true,
             name: true,
             email: true,
+            image: true,
           },
         },
         reactions: {
@@ -101,7 +120,12 @@ export async function GET(request: Request) {
       },
     });
 
-    return NextResponse.json(messages);
+    const transformedMessages = messages.map(message => ({
+      ...message,
+      user: message.sender,
+    }));
+
+    return NextResponse.json(transformedMessages);
   } catch (error) {
     console.error("[DIRECT_MESSAGES_GET]", error);
     return new NextResponse("Internal Error", { status: 500 });
