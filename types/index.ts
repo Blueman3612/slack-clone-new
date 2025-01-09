@@ -18,11 +18,15 @@ export interface Message {
   createdAt: Date;
   updatedAt: Date;
   userId: string;
-  channelId: string;
-  reactions: Reaction[];
+  channelId?: string;
+  receiverId?: string;
+  threadId?: string;
+  replyCount: number;
   user: {
     id: string;
-    name: string | null;
-    image: string | null;
+    name: string;
+    email: string;
+    image: string;
   };
+  reactions: Reaction[];
 } 

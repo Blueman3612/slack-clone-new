@@ -4,6 +4,57 @@ import { prisma } from "@/lib/prisma";
 import { pusherServer } from "@/lib/pusher";
 import { authOptions } from "@/lib/auth";
 
+export async function GET(request: Request) {
+  try {
+    const session = await getServerSession(authOptions);
+    if (!session?.user) {
+      return new NextResponse("Unauthorized", { status: 401 });
+    }
+
+    const { searchParams } = new URL(request.url);
+    const threadId = searchParams.get("threadId");
+
+    if (!threadId) {
+      return new NextResponse("Thread ID required", { status: 400 });
+    }
+
+    const messages = await prisma.message.findMany({
+      where: {
+        threadId: threadId,
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            image: true,
+          },
+        },
+        reactions: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                image: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: {
+        createdAt: 'asc',
+      },
+    });
+
+    return NextResponse.json(messages);
+  } catch (error) {
+    console.error("[THREAD_MESSAGES_GET]", error);
+    return new NextResponse("Internal Error", { status: 500 });
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const session = await getServerSession(authOptions);
@@ -11,67 +62,81 @@ export async function POST(request: Request) {
       return new NextResponse("Unauthorized", { status: 401 });
     }
 
-    const { content, threadId, chatId, chatType } = await request.json();
+    const body = await request.json();
+    const { content, threadId } = body;
 
-    // Use a transaction to ensure both operations complete
-    const result = await prisma.$transaction(async (tx) => {
-      // Create the reply
-      const reply = await tx.message.create({
-        data: {
-          content,
-          userId: session.user.id,
-          threadId,
-          ...(chatType === 'channel' ? { channelId: chatId } : {}),
+    if (!content || !threadId) {
+      return new NextResponse("Missing required fields", { status: 400 });
+    }
+
+    // Get the parent message to check channel
+    const parentMessage = await prisma.message.findUnique({
+      where: { id: threadId },
+      select: {
+        channelId: true,
+        userId: true,
+      },
+    });
+
+    if (!parentMessage) {
+      return new NextResponse("Parent message not found", { status: 404 });
+    }
+
+    // Create reply first
+    const reply = await prisma.message.create({
+      data: {
+        content,
+        userId: session.user.id,
+        channelId: parentMessage.channelId,
+        threadId: threadId,
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            image: true,
+          },
         },
-        include: {
-          user: {
-            select: {
-              id: true,
-              name: true,
-              email: true,
-              image: true,
+        reactions: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                image: true,
+              },
             },
           },
         },
-      });
-
-      // Update the parent message to mark it as a thread starter
-      await tx.message.update({
-        where: { id: threadId },
-        data: {
-          isThreadStarter: true,
-        }
-      });
-
-      return reply;
+      },
     });
+
+    // Get thread count
+    const threadCount = await prisma.message.count({
+      where: { threadId }
+    });
+
+    // Update parent message's thread messages count
+    await prisma.$executeRaw`UPDATE Message SET replyCount = ${threadCount} WHERE id = ${threadId}`;
 
     // Trigger real-time updates
-    const channelName = chatType === 'channel'
-      ? `thread-channel-${chatId}-${threadId}`
-      : `thread-dm-${chatId}-${threadId}`;
-
-    await pusherServer.trigger(channelName, 'new-reply', result);
-
-    // Get updated thread count
-    const threadCount = await prisma.message.count({
-      where: { threadId: threadId }
-    });
-
-    // Update thread count in main chat
-    const mainChannelName = chatType === 'channel'
-      ? `channel-${chatId}`
-      : `dm-${chatId}`;
-
-    await pusherServer.trigger(mainChannelName, 'update-thread', {
+    await pusherServer.trigger(`thread-${threadId}`, 'new-reply', reply);
+    
+    await pusherServer.trigger(`channel-${parentMessage.channelId}`, 'update-thread', {
       messageId: threadId,
       replyCount: threadCount,
-      isThreadStarter: true
+      lastReply: {
+        content: reply.content,
+        user: reply.user,
+        createdAt: reply.createdAt
+      }
     });
 
-    return NextResponse.json(result);
+    return NextResponse.json({ ...reply, replyCount: threadCount });
   } catch (error) {
-    console.error("[THREAD_REPLY]", error);
+    console.error("[THREAD_MESSAGES_POST]", error);
     return new NextResponse("Internal Error", { status: 500 });
   }
 } 

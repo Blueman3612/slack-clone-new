@@ -20,10 +20,10 @@ export default function UserItem({ user }: UserItemProps) {
     >
       <UserAvatar user={user} />
       <div className="flex flex-col items-start">
-        <p className="text-sm font-semibold">
+        <p className="text-sm font-semibold text-gray-900 dark:text-white">
           {user.name}
         </p>
-        <p className="text-xs text-zinc-500">
+        <p className="text-xs text-zinc-500 dark:text-zinc-400">
           {user.email}
         </p>
       </div>

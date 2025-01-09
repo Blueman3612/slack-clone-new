@@ -3,54 +3,26 @@
 import { useState, useEffect, useRef } from 'react'
 import { useSession } from 'next-auth/react'
 import { pusherClient } from '@/lib/pusher'
-import { Message, User, Reaction } from '@prisma/client'
+import { Message } from '@/types'
 import MessageBubble from './MessageBubble'
 import { useOnlineUsers } from '@/contexts/OnlineUsersContext'
 import TypingIndicator from './TypingIndicator'
 import ThreadView from './ThreadView'
 import axios from 'axios'
 
-interface ExtendedMessage extends Message {
-  user?: {
-    name: string;
-    email: string;
-    image?: string | null;
-  };
-  sender?: {
-    name: string;
-    email: string;
-    image?: string | null;
-  };
-  receiver?: {
-    name: string;
-    email: string;
-  };
-  reactions?: (Reaction & {
-    user: {
-      id: string;
-      name: string | null;
-      image: string | null;
-    };
-  })[];
-  replyCount?: number;
-  isThreadStarter?: boolean;
-}
-
-interface ChatInterfaceProps {
-  chatId: string;
-  chatType: 'channel' | 'dm';
-  currentUserId: string;
-  initialMessages: ExtendedMessage[];
-}
-
 export default function ChatInterface({ 
   chatId, 
   chatType, 
   currentUserId, 
   initialMessages = []
-}: ChatInterfaceProps) {
+}: {
+  chatId: string;
+  chatType: 'channel' | 'dm';
+  currentUserId: string;
+  initialMessages: Message[];
+}) {
   const { data: session } = useSession();
-  const [messages, setMessages] = useState<ExtendedMessage[]>(initialMessages);
+  const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [message, setMessage] = useState('');
   const [typingUsers, setTypingUsers] = useState<string[]>([]);
   const { onlineUsers } = useOnlineUsers();
@@ -58,11 +30,11 @@ export default function ChatInterface({
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const currentChannelRef = useRef<string | null>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout>();
-  const [selectedThread, setSelectedThread] = useState<ExtendedMessage | null>(null);
+  const [selectedThread, setSelectedThread] = useState<Message | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Add this function to handle typing events
+  // Handle typing events
   const handleTyping = async () => {
     if (!chatId || !session?.user) return;
 
@@ -70,13 +42,11 @@ export default function ChatInterface({
       ? `channel-${chatId}`
       : `dm-${[currentUserId, chatId].sort().join('-')}`;
 
-    // Clear existing timeout
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current);
     }
 
     try {
-      // Send typing event through API
       await axios.post('/api/pusher/trigger-event', {
         channel: channelName,
         event: 'typing',
@@ -86,7 +56,6 @@ export default function ChatInterface({
         }
       });
 
-      // Set timeout to stop typing
       typingTimeoutRef.current = setTimeout(async () => {
         await axios.post('/api/pusher/trigger-event', {
           channel: channelName,
@@ -109,17 +78,21 @@ export default function ChatInterface({
       setIsLoading(true);
       setError(null);
       try {
-        const endpoint = chatType === 'channel'
-          ? `/api/messages?channelId=${chatId}`
-          : `/api/direct-messages?userId=${chatId}`;
-
-        const response = await fetch(endpoint);
+        const response = await fetch(`/api/messages?${
+          chatType === 'channel' ? 'channelId' : 'receiverId'
+        }=${chatId}`);
+        
         if (!response.ok) {
           throw new Error('Failed to fetch messages');
         }
         const data = await response.json();
+        const messagesWithCounts = data.map((msg: Message) => ({
+          ...msg,
+          replyCount: msg.replyCount || 0
+        }));
+
         if (currentChannelRef.current === chatId) {
-          setMessages(data);
+          setMessages(messagesWithCounts);
           scrollToBottom();
         }
       } catch (error) {
@@ -159,7 +132,7 @@ export default function ChatInterface({
     });
 
     // Handle new messages
-    channel.bind('new-message', (newMessage: ExtendedMessage) => {
+    channel.bind('new-message', (newMessage: Message) => {
       if (currentChannelRef.current === chatId) {
         setMessages((currentMessages) => {
           if (currentMessages.some(m => m.id === newMessage.id)) {
@@ -171,13 +144,35 @@ export default function ChatInterface({
       }
     });
 
+    // Handle thread updates
+    channel.bind('update-thread', (data: {
+      messageId: string;
+      replyCount: number;
+      lastReply: any;
+    }) => {
+      if (currentChannelRef.current === chatId) {
+        setMessages((currentMessages) =>
+          currentMessages.map((msg) => {
+            if (msg.id === data.messageId) {
+              return {
+                ...msg,
+                replyCount: data.replyCount,
+                lastReply: data.lastReply
+              };
+            }
+            return msg;
+          })
+        );
+      }
+    });
+
     // Handle reactions
     channel.bind('message-reaction', (data: {
       messageId: string;
-      reaction: Reaction;
+      reaction: any;
       type: 'add' | 'remove';
     }) => {
-      if (currentChannelRef.current === chatId) { // Only update if we're still on the same chat
+      if (currentChannelRef.current === chatId) {
         setMessages((currentMessages) =>
           currentMessages.map((msg) => {
             if (msg.id === data.messageId) {
@@ -214,7 +209,7 @@ export default function ChatInterface({
     setMessages([]);
     setTypingUsers([]);
     currentChannelRef.current = chatId;
-  }, [chatId, chatType]);
+  }, [chatId]);
 
   const scrollToBottom = () => {
     if (chatContainerRef.current) {
@@ -235,11 +230,7 @@ export default function ChatInterface({
     if (!message.trim() || !chatId) return;
 
     try {
-      const endpoint = chatType === 'channel'
-        ? '/api/messages'
-        : '/api/direct-messages';
-
-      const response = await fetch(endpoint, {
+      const response = await fetch('/api/messages', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -263,15 +254,9 @@ export default function ChatInterface({
     }
   };
 
-  // Add thread click handler
-  const handleThreadClick = (message: ExtendedMessage) => {
-    setSelectedThread(message);
-  };
-
   return (
     <div className="flex h-full">
       <div className="flex-1 flex flex-col h-full relative">
-        {/* Messages container */}
         <div 
           ref={chatContainerRef}
           className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-600"
@@ -291,7 +276,7 @@ export default function ChatInterface({
                 <MessageBubble
                   key={message.id}
                   message={message}
-                  isOwn={message.userId === currentUserId || message.senderId === currentUserId}
+                  isOwn={message.userId === currentUserId}
                   onlineUsers={onlineUsers}
                   onThreadClick={() => setSelectedThread(message)}
                   channelId={chatId}
@@ -303,7 +288,6 @@ export default function ChatInterface({
           )}
         </div>
 
-        {/* Fixed bottom input container */}
         <div className="sticky bottom-0 left-0 right-0 bg-white dark:bg-gray-900 border-t dark:border-gray-700">
           <TypingIndicator typingUsers={typingUsers} />
           <form onSubmit={handleSubmit} className="p-4">
@@ -325,7 +309,6 @@ export default function ChatInterface({
         </div>
       </div>
 
-      {/* Thread sidebar */}
       {selectedThread && (
         <div className="flex-shrink-0 overflow-hidden border-l border-gray-200 dark:border-gray-700">
           <ThreadView

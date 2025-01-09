@@ -3,29 +3,15 @@
 import { useState, useEffect, useRef } from 'react'
 import { useSession } from 'next-auth/react'
 import { pusherClient } from '@/lib/pusher'
-import { Message, User, Reaction } from '@prisma/client'
+import { Message } from '@/types'
 import MessageBubble from './MessageBubble'
 import { X } from 'lucide-react'
 import { useOnlineUsers } from '@/contexts/OnlineUsersContext'
 import TypingIndicator from './TypingIndicator'
 import axios from 'axios'
 
-interface ExtendedMessage extends Message {
-  user?: {
-    name: string;
-    email: string;
-  };
-  reactions?: (Reaction & {
-    user: {
-      id: string;
-      name: string | null;
-      image: string | null;
-    };
-  })[];
-}
-
 interface ThreadViewProps {
-  parentMessage: ExtendedMessage;
+  parentMessage: Message;
   onClose: () => void;
   chatType: 'channel' | 'dm';
   chatId: string;
@@ -40,8 +26,8 @@ export default function ThreadView({
   currentUserId 
 }: ThreadViewProps) {
   const { data: session } = useSession()
-  const [replies, setReplies] = useState<ExtendedMessage[]>([])
-  const [newReply, setNewReply] = useState('')
+  const [messages, setMessages] = useState<Message[]>([])
+  const [newMessage, setNewMessage] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [typingUsers, setTypingUsers] = useState<string[]>([])
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -52,9 +38,7 @@ export default function ThreadView({
   const handleTyping = async () => {
     if (!session?.user) return;
 
-    const channelName = chatType === 'channel'
-      ? `thread-channel-${chatId}-${parentMessage.id}`
-      : `thread-dm-${[currentUserId, chatId].sort().join('-')}-${parentMessage.id}`;
+    const channelName = `thread-${parentMessage.id}`;
 
     // Clear existing timeout
     if (typingTimeoutRef.current) {
@@ -90,10 +74,7 @@ export default function ThreadView({
 
   // Subscribe to thread updates and typing events
   useEffect(() => {
-    const channelName = chatType === 'channel'
-      ? `thread-channel-${chatId}-${parentMessage.id}`
-      : `thread-dm-${[currentUserId, chatId].sort().join('-')}-${parentMessage.id}`;
-
+    const channelName = `thread-${parentMessage.id}`;
     const channel = pusherClient.subscribe(channelName);
 
     // Handle typing events
@@ -116,8 +97,8 @@ export default function ThreadView({
       }
     });
 
-    channel.bind('new-reply', (reply: ExtendedMessage) => {
-      setReplies(current => {
+    channel.bind('new-reply', (reply: Message) => {
+      setMessages(current => {
         if (current.some(msg => msg.id === reply.id)) {
           return current;
         }
@@ -133,7 +114,7 @@ export default function ThreadView({
         clearTimeout(typingTimeoutRef.current);
       }
     };
-  }, [chatId, chatType, currentUserId, parentMessage.id]);
+  }, [currentUserId, parentMessage.id]);
 
   // Fetch thread messages
   useEffect(() => {
@@ -142,7 +123,7 @@ export default function ThreadView({
         const response = await fetch(`/api/messages/thread/${parentMessage.id}`)
         if (response.ok) {
           const data = await response.json()
-          setReplies(data)
+          setMessages(data)
         }
       } catch (error) {
         console.error('Error fetching replies:', error)
@@ -159,13 +140,15 @@ export default function ThreadView({
 
   useEffect(() => {
     scrollToBottom()
-  }, [replies])
+  }, [messages])
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!newReply.trim() || !session?.user) return
+    e.preventDefault();
+    if (!newMessage.trim()) return;
 
-    setIsLoading(true)
+    const messageContent = newMessage;
+    setNewMessage(''); // Clear input immediately for better UX
+
     try {
       const response = await fetch('/api/messages/thread', {
         method: 'POST',
@@ -173,24 +156,46 @@ export default function ThreadView({
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          content: newReply,
+          content: messageContent,
           threadId: parentMessage.id,
-          chatId,
-          chatType
         }),
-      })
+      });
 
       if (!response.ok) {
-        throw new Error('Failed to send reply')
+        throw new Error('Failed to send reply');
       }
 
-      setNewReply('')
+      // Don't update messages here, let Pusher handle it
+      // const data = await response.json();
+      // setMessages(prev => [...prev, data]);
+      
+      scrollToBottom();
     } catch (error) {
-      console.error('Error sending reply:', error)
-    } finally {
-      setIsLoading(false)
+      console.error('Error sending reply:', error);
+      setNewMessage(messageContent); // Restore message if failed
     }
-  }
+  };
+
+  // Add Pusher subscription for real-time updates
+  useEffect(() => {
+    const channel = pusherClient.subscribe(`thread-${parentMessage.id}`);
+
+    channel.bind('new-reply', (message: Message) => {
+      setMessages(prev => {
+        // Avoid duplicate messages
+        if (prev.some(m => m.id === message.id)) {
+          return prev;
+        }
+        return [...prev, message];
+      });
+      scrollToBottom();
+    });
+
+    return () => {
+      channel.unbind_all();
+      pusherClient.unsubscribe(`thread-${parentMessage.id}`);
+    };
+  }, [parentMessage.id]);
 
   return (
     <div className="w-[576px] border-l border-gray-200 dark:border-gray-700 flex flex-col h-full bg-white dark:bg-gray-900">
@@ -212,18 +217,22 @@ export default function ThreadView({
           isOwn={parentMessage.userId === currentUserId}
           showThread={false}
           onlineUsers={onlineUsers}
+          chatType={chatType}
+          chatId={chatId}
         />
       </div>
 
       {/* Thread replies */}
       <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-4">
-        {replies.map((reply) => (
+        {messages.map((message) => (
           <MessageBubble
-            key={reply.id}
-            message={reply}
-            isOwn={reply.userId === currentUserId}
+            key={message.id}
+            message={message}
+            isOwn={message.userId === currentUserId}
             showThread={false}
             onlineUsers={onlineUsers}
+            chatType={chatType}
+            chatId={chatId}
           />
         ))}
         <div ref={messagesEndRef} />
@@ -236,9 +245,9 @@ export default function ThreadView({
           <form onSubmit={handleSubmit}>
             <input
               type="text"
-              value={newReply}
+              value={newMessage}
               onChange={(e) => {
-                setNewReply(e.target.value);
+                setNewMessage(e.target.value);
                 handleTyping();
               }}
               placeholder="Reply in thread..."

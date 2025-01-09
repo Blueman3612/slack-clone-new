@@ -22,7 +22,7 @@ export default async function ChatLayout({
           <h2 className="text-2xl font-light mb-4 text-gray-900 dark:text-white tracking-wide uppercase font-['Inter']">
             Acksle
           </h2>
-          <ChannelList />
+          <ChannelList currentUser={session.user} />
         </div>
         <div className="flex-1">
           <h2 className="text-lg font-semibold mb-4 text-gray-900 dark:text-white">Direct Messages</h2>

@@ -8,9 +8,9 @@ export default function LoginPage() {
   const callbackUrl = searchParams.get('callbackUrl') || '/chat';
 
   return (
-    <div className="flex items-center justify-center min-h-screen bg-gray-100">
-      <div className="p-8 bg-white rounded-lg shadow-md text-center">
-        <h1 className="text-2xl font-bold mb-6">Sign In</h1>
+    <div className="flex items-center justify-center min-h-screen bg-gray-100 dark:bg-gray-900">
+      <div className="p-8 bg-white dark:bg-gray-800 rounded-lg shadow-md text-center">
+        <h1 className="text-2xl font-bold mb-6 dark:text-white">Sign In</h1>
         <SignInButton callbackUrl={callbackUrl} />
       </div>
     </div>

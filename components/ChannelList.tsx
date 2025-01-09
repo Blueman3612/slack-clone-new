@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { User } from '@prisma/client';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Plus } from 'lucide-react';
+import { pusherClient } from '@/lib/pusher';
 
 interface Channel {
   id: string;
@@ -25,7 +26,34 @@ export default function ChannelList({ currentUser }: ChannelListProps) {
 
   useEffect(() => {
     fetchChannels();
-  }, []);
+
+    // Subscribe to channel updates
+    const channel = pusherClient.subscribe('channel-updates');
+
+    channel.bind('channel-created', (newChannel: Channel) => {
+      setChannels(prev => {
+        if (prev.some(ch => ch.id === newChannel.id)) return prev;
+        return [...prev, newChannel];
+      });
+    });
+
+    channel.bind('channel-updated', (updatedChannel: Channel) => {
+      setChannels(prev => 
+        prev.map(ch => ch.id === updatedChannel.id ? updatedChannel : ch)
+      );
+    });
+
+    channel.bind('channel-deleted', (channelId: string) => {
+      setChannels(prev => prev.filter(ch => ch.id !== channelId));
+      if (currentChannelId === channelId) {
+        router.push('/chat');
+      }
+    });
+
+    return () => {
+      pusherClient.unsubscribe('channel-updates');
+    };
+  }, [currentChannelId, router]);
 
   const fetchChannels = async () => {
     try {
@@ -72,7 +100,6 @@ export default function ChannelList({ currentUser }: ChannelListProps) {
       }
 
       const newChannel = await response.json();
-      setChannels([...channels, newChannel]);
       setNewChannelName('');
       setIsCreating(false);
       router.push(`/chat?channelId=${newChannel.id}`);

@@ -38,6 +38,15 @@ export default function UserList({ currentUserId }: UserListProps) {
       );
     });
 
+    // Handle user updates (e.g., status changes)
+    channel.bind('user_updated', (updatedUser: User) => {
+      setUsers(prevUsers => 
+        prevUsers.map(user => 
+          user.id === updatedUser.id ? updatedUser : user
+        )
+      );
+    });
+
     return () => {
       if (isClient) {
         channel.unbind_all();

@@ -2,46 +2,21 @@
 
 import { useState, useEffect } from 'react'
 import { formatDistanceToNow } from 'date-fns'
-import { Message, Reaction } from '@prisma/client'
+import { Message, Reaction } from '@/types'
 import { useSession } from 'next-auth/react'
 import EmojiPicker from './EmojiPicker'
 import { MessageSquare } from 'lucide-react'
 import Image from 'next/image'
 import { pusherClient } from '@/lib/pusher'
 
-interface ExtendedMessage extends Message {
-  user?: {
-    name: string;
-    email: string;
-    image?: string | null;
-  };
-  sender?: {
-    name: string;
-    email: string;
-    image?: string | null;
-  };
-  receiver?: {
-    name: string;
-    email: string;
-  };
-  reactions?: (Reaction & {
-    user: {
-      id: string;
-      name: string | null;
-      image: string | null;
-    };
-  })[];
-  replyCount?: number;
-  isThreadStarter?: boolean;
-}
-
 interface MessageBubbleProps {
-  message: ExtendedMessage;
+  message: Message;
   isOwn: boolean;
   onlineUsers?: Set<string>;
   onThreadClick?: () => void;
   showThread?: boolean;
-  channelId?: string;
+  chatType: 'channel' | 'dm';
+  chatId: string;
 }
 
 export default function MessageBubble({ 
@@ -50,44 +25,52 @@ export default function MessageBubble({
   onlineUsers,
   onThreadClick,
   showThread = true,
-  channelId
+  chatType,
+  chatId
 }: MessageBubbleProps) {
   const { data: session } = useSession()
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
   const [replyCount, setReplyCount] = useState(message.replyCount || 0)
 
   useEffect(() => {
-    if (!channelId) return;
+    setReplyCount(message.replyCount || 0);
+  }, [message.replyCount]);
 
-    const channel = pusherClient.subscribe(`channel-${channelId}`);
+  useEffect(() => {
+    if (!chatId) return;
 
-    channel.bind('update-thread', (data: { 
-      messageId: string; 
-      replyCount: number; 
-      isThreadStarter: boolean;
+    const channelName = chatType === 'channel'
+      ? `channel-${chatId}`
+      : `dm-${[message.userId, message.receiverId].sort().join('-')}`;
+
+    const channel = pusherClient.subscribe(channelName);
+
+    const handleThreadUpdate = (data: { 
+      messageId?: string;
+      threadId?: string;
+      replyCount: number;
     }) => {
-      if (data.messageId === message.id) {
-        console.log(`Updating reply count for message ${message.id} to ${data.replyCount}`);
+      const targetId = data.messageId || data.threadId;
+      if (targetId === message.id) {
         setReplyCount(data.replyCount);
       }
-    });
+    };
+
+    channel.bind('update-thread', handleThreadUpdate);
+    channel.bind('thread-updated', handleThreadUpdate);
+    channel.bind('thread-count-update', handleThreadUpdate);
 
     return () => {
-      channel.unbind('update-thread');
-      pusherClient.unsubscribe(`channel-${channelId}`);
+      channel.unbind('update-thread', handleThreadUpdate);
+      channel.unbind('thread-updated', handleThreadUpdate);
+      channel.unbind('thread-count-update', handleThreadUpdate);
+      pusherClient.unsubscribe(channelName);
     };
-  }, [channelId, message.id]);
+  }, [chatId, chatType, message.id, message.userId, message.receiverId]);
 
-  const userName = message.user?.name || message.sender?.name || 'Unknown User'
-  const userImage = message.user?.image || message.sender?.image || '/default-avatar.png'
-  const isOnline = onlineUsers?.has(message.userId || message.senderId || '')
-
-  console.log("Message data:", {
-    id: message.id,
-    replyCount: message.replyCount,
-    showThread,
-    hasReplies: message.replyCount > 0
-  });
+  const userName = message.user?.name || 'Unknown User'
+  const userImage = message.user?.image || '/default-avatar.png'
+  const isOnline = onlineUsers?.has(message.userId)
 
   const handleReaction = async (emoji: string) => {
     try {
