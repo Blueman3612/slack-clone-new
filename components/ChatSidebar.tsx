@@ -97,7 +97,7 @@ export default function ChatSidebar() {
   };
 
   if (status === 'loading') {
-    return <div className="w-64 bg-gray-800 text-white p-4">Loading...</div>;
+    return <div className="w-64 bg-gray-900 text-white p-4">Loading...</div>;
   }
 
   if (!session?.user) {
@@ -105,7 +105,7 @@ export default function ChatSidebar() {
   }
 
   return (
-    <div className="flex flex-col h-full w-64 bg-gray-800 text-white">
+    <div className="flex flex-col h-full w-64 bg-gray-900 text-white">
       <div className="flex-1 p-4 overflow-y-auto">
         <h1 className="text-2xl font-light tracking-wider mb-8">ACKSLE</h1>
         

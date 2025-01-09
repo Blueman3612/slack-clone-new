@@ -33,6 +33,7 @@ export default function ChatInterface({
   const [selectedThread, setSelectedThread] = useState<Message | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [chatName, setChatName] = useState<string>('');
 
   // Handle typing events
   const handleTyping = async () => {
@@ -242,6 +243,35 @@ export default function ChatInterface({
     }
   }, [messages.length, initialMessages.length]);
 
+  // Add effect to fetch channel or user name
+  useEffect(() => {
+    const fetchChatName = async () => {
+      if (!chatId) return;
+      
+      try {
+        if (chatType === 'channel') {
+          const response = await fetch(`/api/channels/${chatId}`);
+          if (response.ok) {
+            const channel = await response.json();
+            setChatName(`#${channel.name}`);
+          }
+        } else {
+          const response = await fetch(`/api/users/${chatId}`);
+          if (response.ok) {
+            const user = await response.json();
+            setChatName(user.name);
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching chat name:', error);
+        setChatName('');
+      }
+    };
+
+    fetchChatName();
+    // Add chatId and chatType to dependency array
+  }, [chatId, chatType]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!message.trim() || !chatId) return;
@@ -315,7 +345,7 @@ export default function ChatInterface({
                 setMessage(e.target.value);
                 handleTyping();
               }}
-              placeholder="Type a message..."
+              placeholder={chatName ? `Message ${chatName}` : 'Type a message...'}
               className="w-full p-3 rounded-lg border dark:border-gray-600 
                        bg-white dark:bg-gray-800 
                        text-gray-900 dark:text-white

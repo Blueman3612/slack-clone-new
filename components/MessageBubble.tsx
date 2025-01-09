@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { formatDistanceToNow } from 'date-fns'
+import { format, isToday } from 'date-fns'
 import { Message, Reaction } from '@/types'
 import { useSession } from 'next-auth/react'
 import EmojiPicker from './EmojiPicker'
@@ -18,6 +18,12 @@ interface MessageBubbleProps {
   chatType: 'channel' | 'dm';
   chatId: string;
 }
+
+const debug = (message: string) => {
+  if (process.env.NODE_ENV === 'development') {
+    console.debug(`[MessageBubble] ${message}`);
+  }
+};
 
 export default function MessageBubble({ 
   message: initialMessage,
@@ -48,7 +54,7 @@ export default function MessageBubble({
     if (!effectiveChatId) return;
 
     const channelName = `presence-${chatType}-${effectiveChatId}`;
-    console.log('Subscribing to channel:', channelName);
+    debug(`Subscribing to channel: ${channelName}`);
 
     const channel = pusherClient.subscribe(channelName);
 
@@ -103,7 +109,7 @@ export default function MessageBubble({
     if (!session?.user?.id || !effectiveChatId) return;
     
     try {
-      console.log('Sending reaction:', { 
+      debug('Sending reaction:', { 
         emoji, 
         messageId: message.id, 
         chatType, 
@@ -128,10 +134,10 @@ export default function MessageBubble({
       }
 
       const data = await response.json();
-      console.log('Reaction added successfully:', data);
+      debug('Reaction added successfully:', data);
       setShowEmojiPicker(false);
     } catch (error) {
-      console.error('Error adding reaction:', error);
+      debug('Error adding reaction:', error);
     }
   };
 
@@ -152,7 +158,7 @@ export default function MessageBubble({
         throw new Error('Failed to remove reaction');
       }
     } catch (error) {
-      console.error('Error removing reaction:', error);
+      debug('Error removing reaction:', error);
     }
   };
 
@@ -160,14 +166,14 @@ export default function MessageBubble({
     if (!effectiveChatId) return;
 
     const channelName = `presence-${chatType}-${effectiveChatId}`;
-    console.log('Subscribing to channel:', channelName);
+    debug(`Subscribing to channel: ${channelName}`);
 
     const channel = pusherClient.subscribe(channelName);
 
     const handleReactionAdded = (data: { messageId: string, reaction: Reaction }) => {
-      console.log('Reaction added event received:', data);
+      debug('Reaction added event received:', data);
       if (data.messageId === message.id) {
-        console.log('Updating message with new reaction');
+        debug('Updating message with new reaction');
         setMessage(prev => ({
           ...prev,
           reactions: [...(prev.reactions || []), data.reaction]
@@ -176,9 +182,9 @@ export default function MessageBubble({
     };
 
     const handleReactionRemoved = (data: { messageId: string, reactionId: string }) => {
-      console.log('Reaction removed event received:', data);
+      debug('Reaction removed event received:', data);
       if (data.messageId === message.id) {
-        console.log('Removing reaction from message');
+        debug('Removing reaction from message');
         setMessage(prev => ({
           ...prev,
           reactions: (prev.reactions || []).filter(r => r.id !== data.reactionId)
@@ -190,7 +196,7 @@ export default function MessageBubble({
     channel.bind('reaction-removed', handleReactionRemoved);
 
     return () => {
-      console.log('Cleaning up Pusher subscription for:', channelName);
+      debug(`Cleaning up Pusher subscription for: ${channelName}`);
       channel.unbind('reaction-added', handleReactionAdded);
       channel.unbind('reaction-removed', handleReactionRemoved);
       pusherClient.unsubscribe(channelName);
@@ -237,7 +243,7 @@ export default function MessageBubble({
   }, {} as { [key: string]: { users: string[], count: number, hasReacted: boolean } });
 
   return (
-    <div className="flex items-start space-x-3 group px-4 py-2 hover:bg-gray-50 dark:hover:bg-gray-800">
+    <div className="flex items-start space-x-3 group px-4 py-2 hover:bg-black/[0.03] dark:hover:bg-white/[0.02] transition-colors duration-100">
       <div className="relative flex-shrink-0">
         <Image
           src={userImage}
@@ -255,7 +261,9 @@ export default function MessageBubble({
         <div className="flex items-center space-x-2">
           <span className="font-medium text-sm">{userName}</span>
           <span className="text-xs text-gray-500">
-            {formatDistanceToNow(new Date(message.createdAt), { addSuffix: true })}
+            {isToday(new Date(message.createdAt))
+              ? format(new Date(message.createdAt), 'h:mm a')
+              : format(new Date(message.createdAt), 'MMMM d, h:mm a')}
           </span>
         </div>
 

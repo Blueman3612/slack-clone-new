@@ -134,16 +134,16 @@ export default function UserStatus() {
   if (!session?.user) return null
 
   return (
-    <div className="relative mt-auto p-4 border-t border-gray-700">
+    <div className="relative bg-gray-900">
       <button
         onClick={(e) => {
-          e.preventDefault() // Prevent any default button behavior
+          e.preventDefault()
           setShowStatusMenu(!showStatusMenu)
           if (showEmojiPicker) {
             setShowEmojiPicker(false)
           }
         }}
-        className="flex items-center space-x-3 w-full hover:bg-gray-700 p-2 rounded-md"
+        className="flex items-center space-x-3 w-full hover:bg-gray-700 p-6 rounded-md"
         disabled={isLoading}
       >
         <div className="relative flex-shrink-0">
