@@ -1,64 +1,57 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { User } from '@prisma/client';
-import { pusherClient, isClient } from '@/lib/pusher';
-import UserItem from './UserItem';
+import { User } from "@prisma/client";
+import { cn } from "@/lib/utils";
 
 interface UserListProps {
   currentUserId: string;
+  initialUsers?: User[];
+  onUserClick: (userId: string) => void;
+  selectedUserId: string | null;
 }
 
-export default function UserList({ currentUserId }: UserListProps) {
-  const [users, setUsers] = useState<User[]>([]);
-
-  useEffect(() => {
-    if (!isClient) return;
-
-    // Fetch initial users
-    fetch('/api/users')
-      .then(res => res.json())
-      .then(data => setUsers(data.filter(user => user.id !== currentUserId)));
-
-    // Subscribe to presence channel
-    const channel = pusherClient!.subscribe('presence-channel');
-
-    // When a user comes online
-    channel.bind('pusher:member_added', (member: { id: string; info: User }) => {
-      setUsers(prevUsers => {
-        if (prevUsers.find(user => user.id === member.info.id)) return prevUsers;
-        return [...prevUsers, member.info];
-      });
-    });
-
-    // When a user goes offline
-    channel.bind('pusher:member_removed', (member: { id: string }) => {
-      setUsers(prevUsers => 
-        prevUsers.filter(user => user.id !== member.id)
-      );
-    });
-
-    // Handle user updates (e.g., status changes)
-    channel.bind('user_updated', (updatedUser: User) => {
-      setUsers(prevUsers => 
-        prevUsers.map(user => 
-          user.id === updatedUser.id ? updatedUser : user
-        )
-      );
-    });
-
-    return () => {
-      if (isClient) {
-        channel.unbind_all();
-        pusherClient!.unsubscribe('presence-channel');
-      }
-    };
-  }, [currentUserId]);
+export default function UserList({ 
+  currentUserId, 
+  initialUsers = [], 
+  onUserClick,
+  selectedUserId 
+}: UserListProps) {
+  const handleUserClick = (userId: string) => {
+    if (typeof onUserClick === 'function') {
+      console.log('UserList: Handling click for user:', userId);
+      onUserClick(userId);
+    } else {
+      console.error('UserList: onUserClick is not a function');
+    }
+  };
 
   return (
-    <div className="flex flex-col gap-2">
-      {users.map(user => (
-        <UserItem key={user.id} user={user} />
+    <div className="space-y-2">
+      <h2 className="text-lg font-semibold mb-4">Direct Messages</h2>
+      {initialUsers.map((user) => (
+        <button
+          key={user.id}
+          onClick={() => handleUserClick(user.id)}
+          className={cn(
+            "w-full flex items-center space-x-2 px-2 py-1 rounded-md hover:bg-gray-700 transition-colors",
+            selectedUserId === user.id && "bg-gray-700"
+          )}
+        >
+          <div className="relative">
+            {user.image ? (
+              <img
+                src={user.image}
+                alt={user.name || "User"}
+                className="w-6 h-6 rounded-full"
+              />
+            ) : (
+              <div className="w-6 h-6 rounded-full bg-gray-300 dark:bg-gray-700" />
+            )}
+          </div>
+          <span className="text-sm text-gray-300 truncate">
+            {user.name || user.email}
+          </span>
+        </button>
       ))}
     </div>
   );

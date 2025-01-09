@@ -21,8 +21,7 @@ model User {
   sessions        Session[]
   messages        Message[]
   channels        Channel[] @relation("ChannelMembers")
-  sentMessages     DirectMessage[] @relation("SentMessages")
-  receivedMessages DirectMessage[] @relation("ReceivedMessages")
+  receivedMessages Message[] @relation("ReceivedMessages")
   reactions       Reaction[]
 }
 
@@ -66,17 +65,33 @@ model Message {
   content   String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  
+  // User who sent the message
   userId    String
-  channelId String?
   user      User     @relation(fields: [userId], references: [id])
-  channel   Channel? @relation(fields: [channelId], references: [id])
-  reactions Reaction[]
-
-  // Thread fields
+  
+  // For direct messages
+  receiverId String?
+  receiver   User?    @relation("ReceivedMessages", fields: [receiverId], references: [id])
+  
+  // For channel messages
+  channelId  String?
+  channel    Channel? @relation(fields: [channelId], references: [id])
+  
+  // For thread support
   isThreadStarter Boolean @default(false)
-  threadId        String?
-  parentMessage   Message?  @relation("ThreadMessages", fields: [threadId], references: [id])
-  threadMessages  Message[] @relation("ThreadMessages")
+  threadId   String?
+  parentMessage Message? @relation("ThreadMessages", fields: [threadId], references: [id])
+  threadMessages Message[] @relation("ThreadMessages")
+  
+  // Reactions
+  reactions  Reaction[]
+  replyCount Int     @default(0)
+
+  @@index([userId])
+  @@index([receiverId])
+  @@index([channelId])
+  @@index([threadId])
 }
 
 model Channel {
@@ -88,24 +103,6 @@ model Channel {
   updatedAt DateTime  @updatedAt
 }
 
-model DirectMessage {
-  id        String   @id @default(cuid())
-  content   String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  senderId  String
-  receiverId String
-  sender    User     @relation("SentMessages", fields: [senderId], references: [id])
-  receiver  User     @relation("ReceivedMessages", fields: [receiverId], references: [id])
-  reactions Reaction[]
-
-  // Add these new fields for threads
-  isThreadStarter Boolean @default(false)
-  threadId        String?
-  parentMessage   DirectMessage?  @relation("ThreadMessages", fields: [threadId], references: [id])
-  threadMessages  DirectMessage[] @relation("ThreadMessages")
-}
-
 model Reaction {
   id        String   @id @default(cuid())
   emoji     String
@@ -115,12 +112,9 @@ model Reaction {
   // Relations
   message   Message?  @relation(fields: [messageId], references: [id], onDelete: Cascade)
   messageId String?
-  directMessage DirectMessage? @relation(fields: [directMessageId], references: [id], onDelete: Cascade)
-  directMessageId String?
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId    String
 
   @@index([messageId])
-  @@index([directMessageId])
   @@index([userId])
 } 

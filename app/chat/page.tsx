@@ -7,7 +7,7 @@ import { prisma } from "@/lib/prisma";
 export default async function ChatPage({
   searchParams,
 }: {
-  searchParams: { channelId: string; recipientId: string };
+  searchParams: { [key: string]: string | string[] | undefined }
 }) {
   const session = await getServerSession(authOptions);
   
@@ -15,7 +15,12 @@ export default async function ChatPage({
     redirect("/login");
   }
 
-  const { channelId, recipientId } = searchParams;
+  // Convert searchParams to string or undefined
+  const params = await searchParams;
+  const channelId = typeof params.channelId === 'string' ? params.channelId : undefined;
+  const recipientId = typeof params.recipientId === 'string' ? params.recipientId : undefined;
+
+  console.log('Chat page params:', { channelId, recipientId });
 
   if (!channelId && !recipientId) {
     return (
@@ -25,26 +30,31 @@ export default async function ChatPage({
     );
   }
 
-  // Fetch initial messages
+  // Fetch messages based on chat type
   const messages = await prisma.message.findMany({
-    where: channelId ? {
-      channelId,
-      OR: [
-        { threadId: null },
-        { isThreadStarter: true }
-      ]
-    } : {
-      OR: [
-        {
-          senderId: session.user.id,
-          receiverId: recipientId,
+    where: channelId 
+      ? {
+          channelId,
+          threadId: null
+        } 
+      : {
+          AND: [
+            { channelId: null },
+            { threadId: null },
+            {
+              OR: [
+                {
+                  userId: session.user.id,
+                  receiverId: recipientId,
+                },
+                {
+                  userId: recipientId,
+                  receiverId: session.user.id,
+                }
+              ]
+            }
+          ]
         },
-        {
-          senderId: recipientId,
-          receiverId: session.user.id,
-        }
-      ]
-    },
     include: {
       user: {
         select: {
@@ -80,8 +90,22 @@ export default async function ChatPage({
   const messagesWithThreadInfo = messages.map(message => ({
     ...message,
     replyCount: message.threadMessages.length,
-    threadMessages: undefined, // Remove the threadMessages array
+    threadMessages: undefined,
   }));
+
+  // Fetch recipient details if this is a DM
+  let recipient = null;
+  if (recipientId) {
+    recipient = await prisma.user.findUnique({
+      where: { id: recipientId },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        image: true,
+      },
+    });
+  }
 
   return (
     <div className="flex-1 bg-white dark:bg-gray-800">
@@ -90,6 +114,7 @@ export default async function ChatPage({
         chatType={channelId ? 'channel' : 'dm'}
         currentUserId={session.user.id}
         initialMessages={messagesWithThreadInfo}
+        recipient={recipient}
       />
     </div>
   );

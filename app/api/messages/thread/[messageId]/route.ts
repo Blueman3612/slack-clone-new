@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
-import { prisma } from "@/lib/prisma";
-import { pusherServer } from "@/lib/pusher";
 import { authOptions } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
 
 export async function GET(
-  request: Request,
+  req: Request,
   { params }: { params: { messageId: string } }
 ) {
   try {
@@ -14,9 +13,14 @@ export async function GET(
       return new NextResponse("Unauthorized", { status: 401 });
     }
 
+    const messageId = params.messageId;
+    if (!messageId) {
+      return new NextResponse("Message ID required", { status: 400 });
+    }
+
     const replies = await prisma.message.findMany({
       where: {
-        threadId: params.messageId,
+        threadId: messageId,
       },
       include: {
         user: {
@@ -46,7 +50,7 @@ export async function GET(
 
     return NextResponse.json(replies);
   } catch (error) {
-    console.error("[THREAD_MESSAGES]", error);
+    console.error("[THREAD_GET]", error);
     return new NextResponse("Internal Error", { status: 500 });
   }
 }
