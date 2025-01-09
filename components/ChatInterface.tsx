@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react'
 import { useSession } from 'next-auth/react'
 import { pusherClient } from '@/lib/pusher'
 import { Message } from '@/types'
@@ -71,9 +71,34 @@ export default function ChatInterface({
     }
   };
 
-  useEffect(() => {
-    if (!chatId) return;
+  // Separate function for initial positioning (no animation)
+  const positionAtBottom = useCallback(() => {
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+    }
+  }, []);
 
+  // Function for smooth scrolling to bottom (for new messages)
+  const smoothScrollToBottom = () => {
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTo({
+        top: chatContainerRef.current.scrollHeight,
+        behavior: 'smooth'
+      });
+    }
+  };
+
+  // Position at bottom after messages load and render
+  useLayoutEffect(() => {
+    if (!isLoading && messages.length > 0) {
+      // Give the browser a chance to paint
+      const timer = setTimeout(positionAtBottom, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [isLoading, messages.length, positionAtBottom]);
+
+  // Fetch messages when chat changes
+  useEffect(() => {
     const fetchMessages = async () => {
       setIsLoading(true);
       setError(null);
@@ -93,7 +118,6 @@ export default function ChatInterface({
 
         if (currentChannelRef.current === chatId) {
           setMessages(messagesWithCounts);
-          scrollToBottom();
         }
       } catch (error) {
         console.error('Error fetching messages:', error);
@@ -140,7 +164,7 @@ export default function ChatInterface({
           }
           return [...currentMessages, newMessage];
         });
-        scrollToBottom();
+        smoothScrollToBottom();
       }
     });
 
@@ -211,19 +235,12 @@ export default function ChatInterface({
     currentChannelRef.current = chatId;
   }, [chatId]);
 
-  const scrollToBottom = () => {
-    if (chatContainerRef.current) {
-      const { scrollHeight } = chatContainerRef.current;
-      chatContainerRef.current.scrollTo({
-        top: scrollHeight,
-        behavior: 'smooth'
-      });
-    }
-  };
-
+  // Smooth scroll for new messages in current chat
   useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
+    if (messages.length > initialMessages.length) {
+      smoothScrollToBottom();
+    }
+  }, [messages.length, initialMessages.length]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

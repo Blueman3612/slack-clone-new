@@ -7,11 +7,7 @@ import { Channel, User } from '@prisma/client';
 import UserList from './UserList';
 
 export default function ChatSidebar() {
-  console.log('ChatSidebar rendering'); // Debug log
-
   const { data: session, status } = useSession();
-  console.log('Session status:', status, 'Session:', session); // Debug log
-
   const router = useRouter();
   const searchParams = useSearchParams();
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -19,46 +15,26 @@ export default function ChatSidebar() {
   const currentChannelId = searchParams.get('channelId');
   const currentRecipientId = searchParams.get('recipientId');
 
-  // Separate useEffect for users with immediate invocation
   useEffect(() => {
-    console.log('Users useEffect triggered'); // Debug log
-
     const fetchUsers = async () => {
-      if (!session?.user?.id) {
-        console.log('No session user ID available'); // Debug log
-        return;
-      }
-
-      console.log('Fetching users for session ID:', session.user.id); // Debug log
+      if (!session?.user?.id) return;
       
       try {
         const response = await fetch('/api/users', {
           method: 'GET',
           headers: {
             'Content-Type': 'application/json',
-            'Cache-Control': 'no-cache',
-          },
-          cache: 'no-store'
+          }
         });
-
-        console.log('Users API response status:', response.status); // Debug log
 
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);
         }
 
         const data = await response.json();
-        console.log('Users data received:', data); // Debug log
-
-        if (!Array.isArray(data)) {
-          console.error('Received data is not an array:', data);
-          return;
-        }
-
         const filteredUsers = data.filter((user: User) => 
           user.id !== session.user.id
         );
-        console.log('Filtered users:', filteredUsers); // Debug log
         setUsers(filteredUsers);
       } catch (error) {
         console.error('Error fetching users:', error);
@@ -66,9 +42,8 @@ export default function ChatSidebar() {
     };
 
     fetchUsers();
-  }, [session?.user?.id, status]);
+  }, [session?.user?.id]);
 
-  // Separate useEffect for channels
   useEffect(() => {
     const fetchChannels = async () => {
       if (!session?.user?.id) return;
@@ -88,11 +63,6 @@ export default function ChatSidebar() {
     fetchChannels();
   }, [session?.user?.id]);
 
-  const handleUserClick = (userId: string) => {
-    console.log('User clicked:', userId);
-    router.push(`/chat?recipientId=${userId}`);
-  };
-
   if (status === 'loading') {
     return <div className="w-64 bg-gray-800 text-white p-4">Loading...</div>;
   }
@@ -103,15 +73,8 @@ export default function ChatSidebar() {
 
   return (
     <div className="w-64 bg-gray-800 text-white p-4">
-      {/* Debug info at the top */}
-      {process.env.NODE_ENV === 'development' && (
-        <div className="mb-4 text-xs text-gray-500">
-          <p>Session status: {status}</p>
-          <p>Session user: {session?.user?.id}</p>
-          <p>Users count: {users.length}</p>
-        </div>
-      )}
-
+      <h1 className="text-2xl font-light tracking-wider mb-8">ACKSLE</h1>
+      
       <div className="mb-8">
         <h2 className="text-lg font-semibold mb-4">Channels</h2>
         <ul>
@@ -132,7 +95,7 @@ export default function ChatSidebar() {
 
       <UserList
         initialUsers={users}
-        currentUserId={session?.user?.id || ''}
+        currentUserId={session.user.id}
         onUserClick={(userId) => router.push(`/chat?recipientId=${userId}`)}
         selectedUserId={currentRecipientId}
       />

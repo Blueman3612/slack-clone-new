@@ -10,9 +10,19 @@ export default async function ChatPage({
   searchParams: { [key: string]: string | string[] | undefined }
 }) {
   const session = await getServerSession(authOptions);
-  
-  if (!session?.user) {
-    redirect("/login");
+  console.log("Server ", "Chat page params:", searchParams);
+
+  // Only redirect if there are no search params
+  if (!searchParams.channelId && !searchParams.recipientId) {
+    const generalChannel = await prisma.channel.findFirst({
+      where: {
+        name: 'general'
+      }
+    });
+
+    if (generalChannel) {
+      redirect(`/chat?channelId=${generalChannel.id}`);
+    }
   }
 
   // Convert searchParams to string or undefined
