@@ -16,6 +16,7 @@ model User {
   hashedPassword  String?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
+  status          UserStatus?
 
   accounts        Account[]
   sessions        Session[]
@@ -117,4 +118,15 @@ model Reaction {
 
   @@index([messageId])
   @@index([userId])
+}
+
+model UserStatus {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  emoji     String?
+  text      String?
+  expiresAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 } 

@@ -26,19 +26,34 @@ export default function EmojiPicker({
     if (targetRef.current) {
       const rect = targetRef.current.getBoundingClientRect();
       const windowWidth = window.innerWidth;
-      const pickerHeight = 420; // Approximate height of the emoji picker
+      const windowHeight = window.innerHeight;
+      const pickerHeight = 420;
+      const pickerWidth = 352;
+      const padding = 10;
       
-      // Calculate initial top position
-      let topPosition = position === 'top' ? rect.top - pickerHeight : rect.bottom + 10;
+      let rightPosition = windowWidth - rect.right;
+      let topPosition = position === 'top' ? rect.top - pickerHeight : rect.bottom + padding;
       
-      // If the picker would be cut off at the top, position it below the button instead
-      if (topPosition < 0) {
-        topPosition = rect.bottom + 10;
+      // Ensure picker stays within right boundary
+      if (rect.right - pickerWidth < padding) {
+        rightPosition = windowWidth - (rect.right + pickerWidth + padding);
+      }
+
+      // Ensure picker stays within left boundary
+      if (windowWidth - rightPosition - pickerWidth < padding) {
+        rightPosition = padding;
+      }
+
+      // Ensure picker stays within vertical boundaries
+      if (topPosition < padding) {
+        topPosition = rect.bottom + padding;
+      } else if (topPosition + pickerHeight > windowHeight - padding) {
+        topPosition = rect.top - pickerHeight - padding;
       }
 
       setPickerStyle({
         top: topPosition,
-        right: windowWidth - rect.right
+        right: rightPosition
       });
     }
   }, [targetRef, position]);

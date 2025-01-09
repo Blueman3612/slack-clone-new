@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import { Channel, User } from '@prisma/client';
 import UserList from './UserList';
+import UserStatus from './UserStatus';
 import { Plus } from 'lucide-react';
 
 export default function ChatSidebar() {
@@ -104,55 +105,59 @@ export default function ChatSidebar() {
   }
 
   return (
-    <div className="w-64 bg-gray-800 text-white p-4">
-      <h1 className="text-2xl font-light tracking-wider mb-8">ACKSLE</h1>
-      
-      <div className="mb-8">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-lg font-semibold">Channels</h2>
-          <button
-            onClick={() => setIsCreating(true)}
-            className="text-gray-400 hover:text-white"
-          >
-            <Plus size={20} />
-          </button>
+    <div className="flex flex-col h-full w-64 bg-gray-800 text-white">
+      <div className="flex-1 p-4 overflow-y-auto">
+        <h1 className="text-2xl font-light tracking-wider mb-8">ACKSLE</h1>
+        
+        <div className="mb-8">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-lg font-semibold">Channels</h2>
+            <button
+              onClick={() => setIsCreating(true)}
+              className="text-gray-400 hover:text-white"
+            >
+              <Plus size={20} />
+            </button>
+          </div>
+
+          {isCreating && (
+            <form onSubmit={handleCreateChannel} className="mb-4">
+              <input
+                type="text"
+                value={newChannelName}
+                onChange={(e) => setNewChannelName(e.target.value)}
+                placeholder="New channel name"
+                className="w-full bg-gray-700 text-white rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                autoFocus
+              />
+            </form>
+          )}
+
+          <ul>
+            {channels.map(channel => (
+              <li 
+                key={channel.id}
+                className={`
+                  cursor-pointer p-2 rounded
+                  ${currentChannelId === channel.id ? 'bg-gray-700' : 'hover:bg-gray-700'}
+                `}
+                onClick={() => router.push(`/chat?channelId=${channel.id}`)}
+              >
+                # {channel.name}
+              </li>
+            ))}
+          </ul>
         </div>
 
-        {isCreating && (
-          <form onSubmit={handleCreateChannel} className="mb-4">
-            <input
-              type="text"
-              value={newChannelName}
-              onChange={(e) => setNewChannelName(e.target.value)}
-              placeholder="New channel name"
-              className="w-full bg-gray-700 text-white rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              autoFocus
-            />
-          </form>
-        )}
-
-        <ul>
-          {channels.map(channel => (
-            <li 
-              key={channel.id}
-              className={`
-                cursor-pointer p-2 rounded
-                ${currentChannelId === channel.id ? 'bg-gray-700' : 'hover:bg-gray-700'}
-              `}
-              onClick={() => router.push(`/chat?channelId=${channel.id}`)}
-            >
-              # {channel.name}
-            </li>
-          ))}
-        </ul>
+        <UserList
+          initialUsers={users}
+          currentUserId={session.user.id}
+          onUserClick={(userId) => router.push(`/chat?recipientId=${userId}`)}
+          selectedUserId={currentRecipientId}
+        />
       </div>
 
-      <UserList
-        initialUsers={users}
-        currentUserId={session.user.id}
-        onUserClick={(userId) => router.push(`/chat?recipientId=${userId}`)}
-        selectedUserId={currentRecipientId}
-      />
+      <UserStatus />
     </div>
   );
 } 
