@@ -12,6 +12,7 @@ import axios from 'axios'
 import { FiPaperclip } from 'react-icons/fi';
 import FilePreview from './FilePreview';
 import SearchBar from './SearchBar';
+import { useRouter } from 'next/navigation';
 
 export default function ChatInterface({ 
   chatId, 
@@ -42,6 +43,9 @@ export default function ChatInterface({
   const [searchResults, setSearchResults] = useState<Message[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [currentSearchQuery, setCurrentSearchQuery] = useState('');
+  const router = useRouter();
+  const [pendingMessageId, setPendingMessageId] = useState<string | null>(null);
+  const [shouldScrollToBottom, setShouldScrollToBottom] = useState(true);
 
   // Handle typing events
   const handleTyping = async () => {
@@ -256,7 +260,7 @@ export default function ChatInterface({
         clearTimeout(typingTimeoutRef.current);
       }
     };
-  }, [chatId, chatType, currentUserId, selectedThread?.id]);
+  }, [chatId, chatType, currentUserId]);
 
   // Reset messages when changing chats
   useEffect(() => {
@@ -265,12 +269,12 @@ export default function ChatInterface({
     currentChannelRef.current = chatId;
   }, [chatId]);
 
-  // Modify this effect to only scroll for new messages, not deletions
+  // Modify this effect to not scroll when opening threads
   useEffect(() => {
-    if (messages.length > initialMessages.length) {
+    if (messages.length > initialMessages.length && !selectedThread) {
       smoothScrollToBottom();
     }
-  }, [messages.length, initialMessages.length]);
+  }, [messages.length, initialMessages.length, selectedThread]);
 
   // Fetch chat name when component mounts or chatId changes
   useEffect(() => {
@@ -369,35 +373,26 @@ export default function ChatInterface({
     }
   };
 
-  const handleSearch = async (query: string) => {
+  const handleSearch = async (query: string, results: any) => {
+    console.log('Search results:', {
+      query,
+      resultCount: Object.keys(results).length,
+      groups: Object.entries(results).map(([key, group]: [string, any]) => ({
+        key,
+        type: group.type,
+        name: group.name,
+        messageCount: group.messages.length,
+        messages: group.messages.map((m: any) => ({
+          id: m.id,
+          content: m.content,
+          channelId: m.channelId,
+          userId: m.userId
+        }))
+      }))
+    });
+    
+    setSearchResults(results);
     setCurrentSearchQuery(query);
-    if (!query.trim()) {
-      setSearchResults([]);
-      setIsSearching(false);
-      return;
-    }
-
-    setIsSearching(true);
-    try {
-      const response = await fetch(`/api/messages/search?${
-        chatType === 'channel' ? 'channelId' : 'receiverId'
-      }=${chatId}&query=${encodeURIComponent(query)}`);
-      
-      if (!response.ok) {
-        throw new Error('Failed to search messages');
-      }
-      
-      const data = await response.json();
-      // Sort messages by creation date, oldest first
-      const sortedResults = data.sort((a: Message, b: Message) => 
-        new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-      );
-      setSearchResults(sortedResults);
-    } catch (error) {
-      console.error('Error searching messages:', error);
-    } finally {
-      setIsSearching(false);
-    }
   };
 
   const scrollToBottom = useCallback(() => {
@@ -411,71 +406,138 @@ export default function ChatInterface({
     }
   }, [searchResults, currentSearchQuery]);
 
+  // Add useEffect to scroll to top when search results change
+  useEffect(() => {
+    if (searchResults.length > 0) {
+      chatContainerRef.current?.scrollTo({ top: 0 });
+    }
+  }, [searchResults]);
+
+  // Add useEffect to clear search when chatId or chatType changes
+  useEffect(() => {
+    setSearchResults([]);
+    setCurrentSearchQuery('');
+  }, [chatId, chatType]);
+
+  const handleSearchMessageClick = async (message: Message) => {
+    // Set the pending message ID before navigation
+    setPendingMessageId(message.id);
+    setShouldScrollToBottom(false);
+
+    // Clear search results
+    setSearchResults([]);
+    setCurrentSearchQuery('');
+
+    // For DMs, determine the correct user ID
+    if (!message.channelId && message.receiverId) {
+      const dmPartnerId = message.userId === currentUserId ? message.receiverId : message.userId;
+      router.push(`/chat?userId=${dmPartnerId}`);
+    } else if (message.channelId) {
+      // For channels
+      router.push(`/chat?channelId=${message.channelId}`);
+    }
+  };
+
+  // Modify scroll behavior to respect priorities
+  useEffect(() => {
+    if (pendingMessageId) {
+      const messageElement = document.getElementById(`message-${pendingMessageId}`);
+      if (messageElement) {
+        setTimeout(() => {
+          messageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          messageElement.classList.add('bg-yellow-100', 'dark:bg-yellow-900');
+          setTimeout(() => {
+            messageElement.classList.remove('bg-yellow-100', 'dark:bg-yellow-900');
+            setPendingMessageId(null);
+          }, 2000);
+        }, 100);
+      }
+    } else if (shouldScrollToBottom && messages.length > initialMessages.length && !currentSearchQuery) {
+      // Only scroll to bottom for new messages
+      scrollToBottom();
+    }
+  }, [messages, pendingMessageId, currentSearchQuery, shouldScrollToBottom, chatId]);
+
+  // Modify the effect that handles new messages
+  useEffect(() => {
+    if (!pendingMessageId && !currentSearchQuery && messages.length > initialMessages.length) {
+      setShouldScrollToBottom(true);
+    }
+  }, [messages.length, initialMessages.length, pendingMessageId, currentSearchQuery]);
+
+  // Update the thread click handler
+  const handleThreadClick = (message: Message) => {
+    setSelectedThread(message);
+  };
+
   return (
     <div className="flex h-full">
       <div className="flex-1 flex flex-col h-full relative">
         <SearchBar onSearch={handleSearch} />
-        <div 
-          ref={chatContainerRef}
-          className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-600"
-        >
+        <div ref={chatContainerRef} className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-600">
           {error && (
-            <div className="p-4 text-red-500 text-center">
-              {error}
-            </div>
+            <div className="p-4 text-red-500 text-center">{error}</div>
           )}
           {isLoading ? (
-            <div className="p-4 text-center">
-              Loading messages...
-            </div>
+            <div className="p-4 text-center">Loading messages...</div>
           ) : (
             <div className="py-4">
               {isSearching ? (
                 <div className="flex items-center justify-center h-16 text-gray-500">
                   Searching...
                 </div>
-              ) : searchResults.length > 0 ? (
-                <div className="py-4">
-                  <div className="px-4 pb-2 text-sm text-gray-500">
-                    Found {searchResults.length} results
-                  </div>
-                  {searchResults.map((message) => (
-                    <MessageBubble
-                      key={message.id}
-                      message={message}
-                      isOwn={message.userId === currentUserId}
-                      onlineUsers={onlineUsers}
-                      onThreadClick={() => setSelectedThread(message)}
-                      channelId={chatId}
-                      chatType={chatType}
-                      chatId={chatId}
-                      searchQuery={currentSearchQuery}
-                    />
+              ) : currentSearchQuery && searchResults.length > 0 ? (
+                <div className="flex flex-col space-y-4 p-4">
+                  {searchResults.map((group) => (
+                    <div key={group.key} className="border-b dark:border-gray-700 pb-4">
+                      <div className="text-sm font-semibold mb-2 text-gray-600 dark:text-gray-400">
+                        {group.type === 'channel' ? '# ' : '🔒 '}
+                        {group.name}
+                        <span className="ml-2 text-xs text-gray-500">
+                          {group.messageCount} {group.messageCount === 1 ? 'result' : 'results'}
+                        </span>
+                      </div>
+                      <div className="space-y-2">
+                        {group.messages.map((message: Message) => (
+                          <MessageBubble
+                            key={message.id}
+                            message={message}
+                            isOwn={message.userId === currentUserId}
+                            onlineUsers={onlineUsers}
+                            onThreadClick={() => setSelectedThread(message)}
+                            chatType={chatType}
+                            chatId={chatId}
+                            searchQuery={currentSearchQuery}
+                            isSearchResult={true}
+                            onMessageClick={() => handleSearchMessageClick(message)}
+                          />
+                        ))}
+                      </div>
+                    </div>
                   ))}
-                  <div ref={messagesEndRef} />
                 </div>
               ) : currentSearchQuery ? (
-                <div className="flex items-center justify-center h-16 text-gray-500">
-                  No results found
+                <div className="flex items-center justify-center p-4 text-gray-500">
+                  No results found for "{currentSearchQuery}"
                 </div>
               ) : (
-                <div className="py-4">
+                // Regular message display
+                <div>
                   {messages?.map((message) => (
-                    <MessageBubble
-                      key={message.id}
-                      message={message}
-                      isOwn={message.userId === currentUserId}
-                      onlineUsers={onlineUsers}
-                      onThreadClick={() => setSelectedThread(message)}
-                      channelId={chatId}
-                      chatType={chatType}
-                      chatId={chatId}
-                      searchQuery={currentSearchQuery}
-                    />
+                    <div key={message.id} id={`message-${message.id}`}>
+                      <MessageBubble
+                        message={message}
+                        isOwn={message.userId === currentUserId}
+                        onlineUsers={onlineUsers}
+                        onThreadClick={() => setSelectedThread(message)}
+                        chatType={chatType}
+                        chatId={chatId}
+                      />
+                    </div>
                   ))}
-                  <div ref={messagesEndRef} />
                 </div>
               )}
+              <div ref={messagesEndRef} />
             </div>
           )}
         </div>
@@ -526,6 +588,7 @@ export default function ChatInterface({
       {selectedThread && (
         <div className="flex-shrink-0 overflow-hidden border-l border-gray-200 dark:border-gray-700">
           <ThreadView
+            key={selectedThread.id}
             parentMessage={selectedThread}
             onClose={() => setSelectedThread(null)}
             chatType={chatType}

@@ -12,35 +12,105 @@ export async function GET(request: Request) {
 
     const { searchParams } = new URL(request.url);
     const query = searchParams.get('query');
-    const channelId = searchParams.get('channelId');
-    const receiverId = searchParams.get('receiverId');
 
     if (!query) {
       return NextResponse.json({ error: "Query parameter is required" }, { status: 400 });
     }
 
-    const whereClause = {
-      AND: [
-        {
-          content: {
-            contains: query,
-          },
+    // First get all channels the user has access to
+    const [userChannels, publicChannels] = await Promise.all([
+      // Get user's joined channels
+      prisma.channel.findMany({
+        where: {
+          members: {
+            some: {
+              id: session.user.id
+            }
+          }
         },
-        channelId ? { channelId } : receiverId ? { receiverId } : {},
-      ],
-    };
+        select: { id: true }
+      }),
+      // Get all channels (for admins) or public channels (for regular users)
+      prisma.channel.findMany({
+        where: {
+          OR: [
+            {
+              name: {
+                not: 'admins-only' // Exclude admin channel for non-admins
+              }
+            },
+            {
+              AND: [
+                { name: 'admins-only' },
+                {
+                  members: {
+                    some: {
+                      id: session.user.id,
+                      role: 'ADMIN'
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        select: { id: true }
+      })
+    ]);
 
-    console.log('Search query:', { query, channelId, receiverId, whereClause });
+    // Combine channel IDs
+    const accessibleChannelIds = [...new Set([
+      ...userChannels.map(c => c.id),
+      ...publicChannels.map(c => c.id)
+    ])];
 
+    // Search for messages
     const messages = await prisma.message.findMany({
-      where: whereClause,
+      where: {
+        AND: [
+          {
+            content: {
+              contains: query.toLowerCase()
+            }
+          },
+          {
+            OR: [
+              { channelId: { in: accessibleChannelIds } },
+              {
+                AND: [
+                  { channelId: null },
+                  {
+                    OR: [
+                      { userId: session.user.id },
+                      { receiverId: session.user.id }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
       include: {
         user: {
           select: {
             id: true,
             name: true,
             image: true,
-          },
+          }
+        },
+        channel: {
+          select: {
+            id: true,
+            name: true,
+          }
+        },
+        receiver: {
+          select: {
+            id: true,
+            name: true,
+            image: true,
+          }
         },
         reactions: {
           include: {
@@ -48,30 +118,58 @@ export async function GET(request: Request) {
               select: {
                 id: true,
                 name: true,
-              },
-            },
-          },
-        },
-        threadMessages: {
-          select: {
-            id: true,
-          },
-        },
+              }
+            }
+          }
+        }
       },
       orderBy: {
-        createdAt: 'desc',
+        createdAt: 'asc'
       },
-      take: 50,
+      take: 50
     });
 
-    const messagesWithThreadInfo = messages.map(message => ({
-      ...message,
-      replyCount: message.threadMessages.length,
-      threadMessages: undefined,
-    }));
+    // Group messages by channel/DM with improved sorting
+    const groupedMessages = messages.reduce((acc, message) => {
+      const key = message.channelId 
+        ? `channel:${message.channelId}` 
+        : `dm:${message.receiverId || message.userId}`;
+      
+      if (!acc[key]) {
+        acc[key] = {
+          type: message.channelId ? 'channel' : 'dm',
+          name: message.channelId 
+            ? message.channel?.name 
+            : message.receiverId === session.user.id
+              ? message.user.name
+              : message.receiver?.name,
+          messages: []
+        };
+      }
+      
+      acc[key].messages.push(message);
+      return acc;
+    }, {} as Record<string, { type: 'channel' | 'dm', name: string, messages: typeof messages }>);
 
-    console.log(`Found ${messagesWithThreadInfo.length} messages`);
-    return NextResponse.json(messagesWithThreadInfo);
+    // Convert to array and sort by message count and name
+    const sortedGroups = Object.entries(groupedMessages)
+      .map(([key, group]) => ({
+        key,
+        ...group,
+        messageCount: group.messages.length
+      }))
+      .sort((a, b) => {
+        // First sort by message count (descending)
+        if (b.messageCount !== a.messageCount) {
+          return b.messageCount - a.messageCount;
+        }
+        // Then sort alphabetically by name, handling undefined names
+        const nameA = a.name || '';
+        const nameB = b.name || '';
+        return nameA.localeCompare(nameB);
+      });
+
+    return NextResponse.json(sortedGroups);
 
   } catch (error) {
     console.error('[SEARCH_ERROR]', error);

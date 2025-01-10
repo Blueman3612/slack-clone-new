@@ -42,8 +42,10 @@ export default function UserList({
           key={user.id}
           onClick={() => onUserClick(user.id)}
           className={cn(
-            "w-full flex items-center gap-3 px-2 py-1 rounded-md hover:bg-gray-700 transition-colors",
-            selectedUserId === user.id && "bg-gray-700"
+            "w-full flex items-center gap-3 px-2 py-1.5 rounded-md transition-all duration-200",
+            selectedUserId === user.id 
+              ? "bg-blue-600/30 border-l-4 border-blue-500" 
+              : "hover:bg-gray-700 border-l-4 border-transparent"
           )}
         >
           <div className={cn(
@@ -60,13 +62,22 @@ export default function UserList({
               <img
                 src={user.image}
                 alt={user.name || "User"}
-                className="w-6 h-6 rounded-full"
+                className={cn(
+                  "w-6 h-6 rounded-full transition-transform duration-200",
+                  selectedUserId === user.id && "scale-110"
+                )}
               />
             ) : (
-              <div className="w-6 h-6 rounded-full bg-gray-300 dark:bg-gray-700" />
+              <div className={cn(
+                "w-6 h-6 rounded-full bg-gray-300 dark:bg-gray-700 transition-transform duration-200",
+                selectedUserId === user.id && "scale-110"
+              )} />
             )}
             <div className="flex items-center gap-1 min-w-0">
-              <span className="text-sm text-gray-300 truncate">
+              <span className={cn(
+                "text-sm truncate transition-colors duration-200",
+                selectedUserId === user.id ? "text-blue-400" : "text-gray-300"
+              )}>
                 {user.name || user.email}
               </span>
               {user.role === 'ADMIN' && (

@@ -22,6 +22,8 @@ interface MessageBubbleProps {
   chatType: 'channel' | 'dm';
   chatId: string;
   searchQuery?: string;
+  onMessageClick?: () => void;
+  isSearchResult?: boolean;
 }
 
 const debug = (message: string) => {
@@ -38,7 +40,9 @@ export default function MessageBubble({
   showThread = true,
   chatType,
   chatId,
-  searchQuery = ''
+  searchQuery = '',
+  onMessageClick,
+  isSearchResult = false
 }: MessageBubbleProps) {
   const { data: session } = useSession()
   const { isAdmin } = useRole()
@@ -347,7 +351,12 @@ export default function MessageBubble({
   const showDeleteButton = isOwn || (isAdmin && chatType === 'channel');
 
   return (
-    <div className="flex items-start space-x-3 group px-4 py-2 hover:bg-black/[0.03] dark:hover:bg-white/[0.02] transition-colors duration-100">
+    <div 
+      className={`flex items-start space-x-3 group px-4 py-2 
+        ${isSearchResult ? 'cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800' : 'hover:bg-black/[0.03] dark:hover:bg-white/[0.02]'} 
+        transition-colors duration-100`}
+      onClick={isSearchResult ? onMessageClick : undefined}
+    >
       <div 
         ref={avatarRef}
         className="relative flex-shrink-0"

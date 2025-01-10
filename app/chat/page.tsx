@@ -9,10 +9,10 @@ export default async function ChatPage({
 }: {
   searchParams: { [key: string]: string | undefined }
 }) {
-  const { channelId, recipientId } = await Promise.resolve(searchParams);
+  const { channelId, userId } = searchParams;
 
-  // Only redirect if there are no search params
-  if (!channelId && !recipientId) {
+  // Only redirect if there are no search params at all
+  if (!channelId && !userId) {
     const generalChannel = await prisma.channel.findFirst({
       where: {
         name: 'general'
@@ -55,10 +55,10 @@ export default async function ChatPage({
               OR: [
                 {
                   userId: session.user.id,
-                  receiverId: recipientId,
+                  receiverId: userId,
                 },
                 {
-                  userId: recipientId,
+                  userId: userId,
                   receiverId: session.user.id,
                 }
               ]
@@ -105,9 +105,9 @@ export default async function ChatPage({
 
   // Fetch recipient details if this is a DM
   let recipient = null;
-  if (recipientId) {
+  if (userId) {
     recipient = await prisma.user.findUnique({
-      where: { id: recipientId },
+      where: { id: userId },
       select: {
         id: true,
         name: true,
@@ -120,7 +120,7 @@ export default async function ChatPage({
   return (
     <div className="flex-1 bg-white dark:bg-gray-800">
       <ChatInterface
-        chatId={channelId || recipientId}
+        chatId={channelId || userId}
         chatType={channelId ? 'channel' : 'dm'}
         currentUserId={session.user.id}
         initialMessages={messagesWithThreadInfo}

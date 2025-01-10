@@ -10,6 +10,7 @@ import UserStatus from './UserStatus';
 import { Plus } from 'lucide-react';
 import { useOnlineUsers } from '@/contexts/OnlineUsersContext';
 import { useRole } from '@/hooks/useRole';
+import { cn } from '@/lib/utils';
 
 export default function ChatSidebar() {
   const { data: session, status } = useSession();
@@ -19,7 +20,7 @@ export default function ChatSidebar() {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const currentChannelId = searchParams.get('channelId');
-  const currentRecipientId = searchParams.get('recipientId');
+  const currentUserId = searchParams.get('userId');
   const [isCreating, setIsCreating] = useState(false);
   const [newChannelName, setNewChannelName] = useState('');
   const { onlineUsers } = useOnlineUsers();
@@ -154,17 +155,28 @@ export default function ChatSidebar() {
             </form>
           )}
 
-          <ul>
+          <ul className="space-y-1">
             {channels.map(channel => (
               <li 
                 key={channel.id}
-                className={`
-                  cursor-pointer p-2 rounded
-                  ${currentChannelId === channel.id ? 'bg-gray-700' : 'hover:bg-gray-700'}
-                `}
+                className={cn(
+                  "flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer transition-all duration-200",
+                  currentChannelId === channel.id
+                    ? "bg-blue-600/30 border-l-4 border-blue-500"
+                    : "hover:bg-gray-700 border-l-4 border-transparent"
+                )}
                 onClick={() => router.push(`/chat?channelId=${channel.id}`)}
               >
-                # {channel.name}
+                <span className={cn(
+                  "text-sm transition-colors duration-200",
+                  currentChannelId === channel.id ? "text-blue-400" : "text-gray-300"
+                )}>#</span>
+                <span className={cn(
+                  "text-sm transition-colors duration-200",
+                  currentChannelId === channel.id ? "text-blue-400" : "text-white"
+                )}>
+                  {channel.name}
+                </span>
               </li>
             ))}
           </ul>
@@ -173,8 +185,8 @@ export default function ChatSidebar() {
         <UserList
           initialUsers={users}
           currentUserId={session?.user?.id || ''}
-          onUserClick={(userId) => router.push(`/chat?recipientId=${userId}`)}
-          selectedUserId={currentRecipientId}
+          onUserClick={(userId) => router.push(`/chat?userId=${userId}`)}
+          selectedUserId={currentUserId}
           onlineUsers={onlineUsers}
         />
       </div>

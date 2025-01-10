@@ -64,8 +64,8 @@ export default function ChannelList({ currentUser }: ChannelListProps) {
       const data = await response.json();
       setChannels(data);
 
-      // If no channel is selected, default to general
-      if (!currentChannelId && data.length > 0) {
+      // Only redirect to general if no channel OR user is selected
+      if (!currentChannelId && !searchParams.get('userId') && data.length > 0) {
         const generalChannel = data.find((channel: Channel) => channel.name === 'general');
         if (generalChannel) {
           router.push(`/chat?channelId=${generalChannel.id}`);

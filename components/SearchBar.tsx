@@ -3,25 +3,55 @@
 import { useState, useEffect, useCallback } from 'react';
 import { FiSearch } from 'react-icons/fi';
 import debounce from 'lodash/debounce';
+import { Message } from '@/types';
 
 interface SearchBarProps {
-  onSearch: (query: string) => void;
+  onSearch: (query: string, results: Array<{
+    key: string;
+    type: 'channel' | 'dm';
+    name: string;
+    messages: Message[];
+    messageCount: number;
+  }>) => void;
 }
 
 export default function SearchBar({ onSearch }: SearchBarProps) {
   const [searchQuery, setSearchQuery] = useState('');
+  const [isSearching, setIsSearching] = useState(false);
 
-  // Debounce the search to avoid too many API calls
+  useEffect(() => {
+    if (!searchQuery && !isSearching) {
+      setSearchQuery('');
+    }
+  }, [searchQuery, isSearching]);
+
+  const performSearch = async (query: string) => {
+    if (!query.trim()) {
+      onSearch('', []);
+      setSearchQuery('');
+      return;
+    }
+
+    setIsSearching(true);
+    try {
+      const response = await fetch(`/api/messages/search?query=${encodeURIComponent(query)}`);
+      if (!response.ok) throw new Error('Search failed');
+      
+      const results = await response.json();
+      onSearch(query, results);
+    } catch (error) {
+      console.error('Search error:', error);
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
   const debouncedSearch = useCallback(
-    debounce((query: string) => {
-      console.log('SearchBar: Triggering search with query:', query); // Debug log
-      onSearch(query);
-    }, 300),
-    [onSearch]
+    debounce(performSearch, 300),
+    []
   );
 
   useEffect(() => {
-    // Cleanup the debounced function on unmount
     return () => {
       debouncedSearch.cancel();
     };
@@ -35,7 +65,7 @@ export default function SearchBar({ onSearch }: SearchBarProps) {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSearch(searchQuery);
+    performSearch(searchQuery);
   };
 
   return (
@@ -54,7 +84,8 @@ export default function SearchBar({ onSearch }: SearchBarProps) {
                    focus:outline-none focus:ring-2 focus:ring-blue-500
                    transition-colors duration-200"
         />
-        <FiSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+        <FiSearch className={`absolute left-3 top-1/2 transform -translate-y-1/2 
+          ${isSearching ? 'animate-pulse' : ''} text-gray-400`} />
       </form>
     </div>
   );
