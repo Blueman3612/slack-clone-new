@@ -19,7 +19,7 @@ interface ThreadViewProps {
 }
 
 export default function ThreadView({ 
-  parentMessage, 
+  parentMessage: initialParentMessage,
   onClose,
   chatType,
   chatId,
@@ -27,6 +27,7 @@ export default function ThreadView({
 }: ThreadViewProps) {
   const { data: session } = useSession()
   const [messages, setMessages] = useState<Message[]>([])
+  const [parentMessage, setParentMessage] = useState(initialParentMessage)
   const [newMessage, setNewMessage] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [typingUsers, setTypingUsers] = useState<string[]>([])
@@ -107,6 +108,13 @@ export default function ThreadView({
       scrollToBottom();
     });
 
+    channel.bind('thread-count-update', (data: { replyCount: number }) => {
+      setParentMessage(prev => ({
+        ...prev,
+        replyCount: data.replyCount
+      }));
+    });
+
     return () => {
       channel.unbind_all();
       pusherClient.unsubscribe(channelName);
@@ -147,7 +155,7 @@ export default function ThreadView({
     if (!newMessage.trim()) return;
 
     const messageContent = newMessage;
-    setNewMessage(''); // Clear input immediately for better UX
+    setNewMessage('');
 
     try {
       const response = await fetch('/api/messages/thread', {
@@ -165,14 +173,11 @@ export default function ThreadView({
         throw new Error('Failed to send reply');
       }
 
-      // Don't update messages here, let Pusher handle it
-      // const data = await response.json();
-      // setMessages(prev => [...prev, data]);
-      
+      // The reply count will be updated through Pusher
       scrollToBottom();
     } catch (error) {
       console.error('Error sending reply:', error);
-      setNewMessage(messageContent); // Restore message if failed
+      setNewMessage(messageContent);
     }
   };
 

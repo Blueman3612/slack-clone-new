@@ -134,6 +134,11 @@ export async function POST(request: Request) {
       }
     });
 
+    // Add new thread count update event
+    await pusherServer.trigger(`thread-${threadId}`, 'thread-count-update', {
+      replyCount: threadCount
+    });
+
     return NextResponse.json({ ...reply, replyCount: threadCount });
   } catch (error) {
     console.error("[THREAD_MESSAGES_POST]", error);

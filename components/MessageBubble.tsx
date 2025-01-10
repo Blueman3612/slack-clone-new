@@ -51,6 +51,7 @@ export default function MessageBubble({
 
   useEffect(() => {
     setMessage(initialMessage)
+    setReplyCount(initialMessage.replyCount || 0)
   }, [initialMessage])
 
   useEffect(() => {
@@ -285,6 +286,22 @@ export default function MessageBubble({
       </div>
     );
   };
+
+  // Subscribe to thread count updates
+  useEffect(() => {
+    const channelName = `thread-${message.id}`;
+    const channel = pusherClient.subscribe(channelName);
+
+    channel.bind('thread-count-update', (data: { replyCount: number }) => {
+      console.log('Received thread count update:', data);
+      setReplyCount(data.replyCount);
+    });
+
+    return () => {
+      channel.unbind_all();
+      pusherClient.unsubscribe(channelName);
+    };
+  }, [message.id]);
 
   return (
     <div className="flex items-start space-x-3 group px-4 py-2 hover:bg-black/[0.03] dark:hover:bg-white/[0.02] transition-colors duration-100">
