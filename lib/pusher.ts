@@ -1,21 +1,12 @@
 import PusherServer from 'pusher'
 import PusherClient from 'pusher-js'
 
-console.log('Environment:', {
-  isClient: typeof window !== 'undefined',
-  hasAppId: !!process.env.PUSHER_APP_ID,
-  hasKey: !!process.env.NEXT_PUBLIC_PUSHER_KEY,
-  hasSecret: !!process.env.PUSHER_SECRET,
-  hasCluster: !!process.env.NEXT_PUBLIC_PUSHER_CLUSTER
-});
-
-// Server-side Pusher instance
 export const pusherServer = new PusherServer({
   appId: process.env.PUSHER_APP_ID!,
   key: process.env.NEXT_PUBLIC_PUSHER_KEY!,
   secret: process.env.PUSHER_SECRET!,
   cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER!,
-  useTLS: true,
+  useTLS: true
 });
 
 // Client-side Pusher instance
@@ -39,4 +30,4 @@ if (pusherClient) {
   pusherClient.connection.bind('state_change', (states: any) => {
     console.log('Pusher connection state changed:', states);
   });
-} 
+}
