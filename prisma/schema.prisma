@@ -17,6 +17,7 @@ model User {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
   status          UserStatus?
+  role            String    @default("USER")
 
   accounts        Account[]
   sessions        Session[]

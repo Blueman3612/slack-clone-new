@@ -9,9 +9,11 @@ import UserList from './UserList';
 import UserStatus from './UserStatus';
 import { Plus } from 'lucide-react';
 import { useOnlineUsers } from '@/contexts/OnlineUsersContext';
+import { useRole } from '@/hooks/useRole';
 
 export default function ChatSidebar() {
   const { data: session, status } = useSession();
+  const { isAdmin } = useRole();
   const router = useRouter();
   const searchParams = useSearchParams();
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -120,18 +122,23 @@ export default function ChatSidebar() {
               priority
             />
           </div>
-          <h1 className="text-4xl font-light tracking-wider">ACKSLE</h1>
+          <h1 className="text-4xl font-light tracking-wider leading-none" style={{ transform: 'scaleY(2)' }}>
+            ACKSLE
+          </h1>
         </div>
         
         <div className="mb-8">
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-lg font-semibold">Channels</h2>
-            <button
-              onClick={() => setIsCreating(true)}
-              className="text-gray-400 hover:text-white"
-            >
-              <Plus size={20} />
-            </button>
+            {isAdmin && (
+              <button
+                onClick={() => setIsCreating(true)}
+                className="text-gray-400 hover:text-white"
+                title="Create Channel"
+              >
+                <Plus size={20} />
+              </button>
+            )}
           </div>
 
           {isCreating && (

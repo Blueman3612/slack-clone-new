@@ -7,16 +7,9 @@ import { prisma } from "@/lib/prisma";
 export default async function ChatPage({
   searchParams,
 }: {
-  searchParams: { [key: string]: string | undefined };
+  searchParams: { [key: string]: string | undefined }
 }) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) {
-    redirect('/');
-  }
-
-  // Access searchParams directly instead of using URLSearchParams
-  const channelId = searchParams.channelId;
-  const recipientId = searchParams.recipientId;
+  const { channelId, recipientId } = await Promise.resolve(searchParams);
 
   // Only redirect if there are no search params
   if (!channelId && !recipientId) {
@@ -28,7 +21,23 @@ export default async function ChatPage({
 
     if (generalChannel) {
       redirect(`/chat?channelId=${generalChannel.id}`);
+    } else {
+      // Fallback to first channel if #general doesn't exist
+      const defaultChannel = await prisma.channel.findFirst({
+        orderBy: {
+          name: 'asc'
+        }
+      });
+
+      if (defaultChannel) {
+        redirect(`/chat?channelId=${defaultChannel.id}`);
+      }
     }
+  }
+
+  const session = await getServerSession(authOptions);
+  if (!session?.user) {
+    redirect('/');
   }
 
   // Fetch messages based on chat type

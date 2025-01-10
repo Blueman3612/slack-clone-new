@@ -30,17 +30,30 @@ export async function POST(request: Request) {
       return new NextResponse("Unauthorized", { status: 401 });
     }
 
+    // Check if user is admin
+    const user = await prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: { role: true }
+    });
+
+    if (user?.role !== "ADMIN") {
+      return new NextResponse("Forbidden: Only admins can create channels", { status: 403 });
+    }
+
     const body = await request.json();
     const { name } = body;
 
     if (!name) {
-      return new NextResponse("Missing name", { status: 400 });
+      return new NextResponse("Name is required", { status: 400 });
     }
 
     const channel = await prisma.channel.create({
       data: {
-        name: name.toLowerCase().trim(),
-      },
+        name,
+        members: {
+          connect: { id: session.user.id }
+        }
+      }
     });
 
     return NextResponse.json(channel);

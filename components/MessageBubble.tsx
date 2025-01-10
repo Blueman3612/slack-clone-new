@@ -5,7 +5,7 @@ import { format, isToday } from 'date-fns'
 import { Message, Reaction } from '@/types'
 import { useSession } from 'next-auth/react'
 import EmojiPicker from './EmojiPicker'
-import { MessageSquare } from 'lucide-react'
+import { MessageSquare, Shield } from 'lucide-react'
 import Image from 'next/image'
 import { pusherClient } from '@/lib/pusher'
 import { highlightText } from '@/utils/highlightText'
@@ -345,6 +345,9 @@ export default function MessageBubble({
       <div className="flex-1 min-w-0">
         <div className="flex items-center space-x-2">
           <span className="font-medium text-sm">{userName}</span>
+          {message.user?.role === 'ADMIN' && (
+            <Shield className="w-4 h-4 text-blue-400" title="Admin" />
+          )}
           <span className="text-xs text-gray-500">
             {isToday(new Date(message.createdAt))
               ? format(new Date(message.createdAt), 'h:mm a')

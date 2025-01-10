@@ -6,9 +6,11 @@ export async function GET(
   { params }: { params: { userId: string } }
 ) {
   try {
+    const { userId } = await Promise.resolve(params);
+    
     const status = await prisma.userStatus.findUnique({
       where: {
-        userId: params.userId,
+        userId,
       },
     });
 

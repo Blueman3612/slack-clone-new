@@ -45,6 +45,7 @@ export async function GET(request: Request) {
             name: true,
             email: true,
             image: true,
+            role: true,
           },
         },
         reactions: {
@@ -109,6 +110,7 @@ export async function POST(request: Request) {
             name: true,
             email: true,
             image: true,
+            role: true,
           },
         },
         reactions: {

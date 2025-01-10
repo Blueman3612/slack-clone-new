@@ -5,10 +5,11 @@ import { User } from "@prisma/client";
 import { cn } from "@/lib/utils";
 import StatusTooltip from './StatusTooltip';
 import { useUserStatus } from '@/contexts/UserStatusContext';
+import { Shield } from 'lucide-react';
 
 interface UserListProps {
   currentUserId: string;
-  initialUsers?: User[];
+  initialUsers?: (User & { role?: string })[];
   onUserClick: (userId: string) => void;
   selectedUserId: string | null;
   onlineUsers?: Set<string>;
@@ -25,7 +26,6 @@ export default function UserList({
   const userRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
   const { statuses, fetchStatus } = useUserStatus();
 
-  // Replace the status fetching effect with this one
   useEffect(() => {
     initialUsers.forEach(user => {
       if (!statuses[user.id]) {
@@ -33,8 +33,6 @@ export default function UserList({
       }
     });
   }, [initialUsers, fetchStatus, statuses]);
-
-  // Remove the old Pusher subscription since it's now handled by the context
 
   return (
     <div className="space-y-2">
@@ -67,9 +65,14 @@ export default function UserList({
             ) : (
               <div className="w-6 h-6 rounded-full bg-gray-300 dark:bg-gray-700" />
             )}
-            <span className="text-sm text-gray-300 truncate">
-              {user.name || user.email}
-            </span>
+            <div className="flex items-center gap-1 min-w-0">
+              <span className="text-sm text-gray-300 truncate">
+                {user.name || user.email}
+              </span>
+              {user.role === 'ADMIN' && (
+                <Shield className="w-4 h-4 text-blue-400 flex-shrink-0" title="Admin" />
+              )}
+            </div>
             {hoveredUserId === user.id && statuses[user.id] && userRefs.current[user.id] && (
               <StatusTooltip 
                 emoji={statuses[user.id]?.emoji} 
