@@ -7,7 +7,7 @@ import { UserStatusProvider } from '@/contexts/UserStatusContext'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'Slack Clone',
+  title: 'Acksle',
   description: 'A real-time chat application',
 }
 

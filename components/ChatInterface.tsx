@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react'
-import { useSession } from 'next-auth/react'
+import { useSession, signOut } from 'next-auth/react'
 import { pusherClient } from '@/lib/pusher'
 import { Message } from '@/types'
 import MessageBubble from './MessageBubble'
@@ -13,6 +13,7 @@ import { FiPaperclip } from 'react-icons/fi';
 import FilePreview from './FilePreview';
 import SearchBar from './SearchBar';
 import { useRouter } from 'next/navigation';
+import { LogOut } from 'lucide-react';
 
 export default function ChatInterface({ 
   chatId, 
@@ -473,7 +474,23 @@ export default function ChatInterface({
   return (
     <div className="flex h-full">
       <div className="flex-1 flex flex-col h-full relative">
-        <SearchBar onSearch={handleSearch} />
+        <div className="sticky top-0 left-0 right-0 bg-white dark:bg-gray-900 border-b dark:border-gray-700">
+          <div className="p-4">
+            <div className="relative flex items-center">
+              <div className="flex-1">
+                <SearchBar onSearch={handleSearch} />
+              </div>
+              <button
+                onClick={() => signOut()}
+                className="ml-4 p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 
+                         hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors flex-shrink-0"
+                title="Sign out"
+              >
+                <LogOut className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+        </div>
         <div ref={chatContainerRef} className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-600">
           {error && (
             <div className="p-4 text-red-500 text-center">{error}</div>

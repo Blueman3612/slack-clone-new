@@ -1,6 +1,6 @@
 'use client'
 
-import { useSession } from 'next-auth/react'
+import { useSession, signOut } from 'next-auth/react'
 import Image from 'next/image'
 import { useState, useRef, useEffect } from 'react'
 import { 
@@ -11,9 +11,11 @@ import {
   CheckCircle2,
   MinusCircle,
   MoonStar,
-  MessageCircle
+  MessageCircle,
+  LogOut
 } from 'lucide-react'
 import EmojiPicker from './EmojiPicker'
+import { useUserStatus } from '@/contexts/UserStatusContext'
 
 const DEFAULT_STATUSES = [
   { emoji: '👋', text: 'In a meeting', icon: Calendar },
@@ -33,6 +35,7 @@ export default function UserStatus() {
   const [isLoading, setIsLoading] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
   const emojiButtonRef = useRef<HTMLButtonElement>(null)
+  const { status, setStatus } = useUserStatus()
 
   // Fetch initial status
   useEffect(() => {
