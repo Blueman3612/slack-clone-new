@@ -383,16 +383,18 @@ export default function ChatInterface({
         chatType === 'channel' ? 'channelId' : 'receiverId'
       }=${chatId}&query=${encodeURIComponent(query)}`);
       
-      const data = await response.json();
-      
       if (!response.ok) {
-        throw new Error(data.error || 'Search failed');
+        throw new Error('Failed to search messages');
       }
       
-      setSearchResults(data);
+      const data = await response.json();
+      // Sort messages by creation date, oldest first
+      const sortedResults = data.sort((a: Message, b: Message) => 
+        new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+      );
+      setSearchResults(sortedResults);
     } catch (error) {
-      console.error('Search error:', error);
-      setSearchResults([]);
+      console.error('Error searching messages:', error);
     } finally {
       setIsSearching(false);
     }
@@ -468,7 +470,7 @@ export default function ChatInterface({
                       channelId={chatId}
                       chatType={chatType}
                       chatId={chatId}
-                      searchQuery=""
+                      searchQuery={currentSearchQuery}
                     />
                   ))}
                   <div ref={messagesEndRef} />

@@ -14,6 +14,7 @@ export default function SearchBar({ onSearch }: SearchBarProps) {
   // Debounce the search to avoid too many API calls
   const debouncedSearch = useCallback(
     debounce((query: string) => {
+      console.log('SearchBar: Triggering search with query:', query); // Debug log
       onSearch(query);
     }, 300),
     [onSearch]

@@ -279,16 +279,19 @@ export default function MessageBubble({
       );
     }
 
+    const highlightedContent = searchQuery
+      ? message.content.replace(
+          new RegExp(`(${searchQuery})`, 'gi'),
+          '<mark class="bg-yellow-300 text-black">$1</mark>'
+        )
+      : message.content;
+
     return (
-      <div className="mt-1">
-        {message.content && searchQuery ? (
-          <div className="whitespace-pre-wrap break-words">
-            {highlightText(message.content, searchQuery)}
-          </div>
+      <div className="whitespace-pre-wrap break-words">
+        {searchQuery ? (
+          <div dangerouslySetInnerHTML={{ __html: highlightedContent }} />
         ) : (
-          <div className="whitespace-pre-wrap break-words">
-            {message.content}
-          </div>
+          message.content
         )}
       </div>
     );

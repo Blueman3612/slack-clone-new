@@ -15,7 +15,8 @@ export async function POST(
     }
 
     const body = await request.json();
-    const { emoji } = body;
+    const { emoji, chatType, chatId } = body;
+    const messageId = params.messageId;
 
     if (!emoji) {
       return new NextResponse("Emoji is required", { status: 400 });
@@ -29,6 +30,7 @@ export async function POST(
         channelId: true,
         userId: true,
         receiverId: true,
+        threadId: true,
       }
     });
 
@@ -103,19 +105,32 @@ export async function POST(
     });
 
     if (updatedMessage) {
-      // Determine channel name based on message type
-      const channelName = message.channelId 
-        ? `channel-${message.channelId}`
-        : `dm-${[message.userId, message.receiverId].sort().join('-')}`;
-
+      // Determine if the message is part of a thread
+      const isThreadMessage = Boolean(message.threadId);
+      
+      // Use the thread's parent message ID as chatId if it's a thread message
+      const effectiveChatId = isThreadMessage ? message.threadId : chatId;
+      const effectiveChatType = isThreadMessage ? 'thread' : chatType;
+      
+      const channelName = `presence-${effectiveChatType}-${effectiveChatId}`;
+      
       await pusherServer.trigger(channelName, 'message-reaction', {
-        messageId: params.messageId,
-        reaction: reaction,
-        type: existingReaction ? 'remove' : 'add',
+        messageId: messageId,
+        reaction: reaction || existingReaction,
+        type: existingReaction ? 'remove' : 'add'
       });
+
+      // If it's a thread message, also trigger on the thread-specific channel
+      if (isThreadMessage) {
+        await pusherServer.trigger(`thread-${message.threadId}`, 'message-reaction', {
+          messageId: messageId,
+          reaction: reaction || existingReaction,
+          type: existingReaction ? 'remove' : 'add'
+        });
+      }
     }
 
-    return NextResponse.json(reaction);
+    return NextResponse.json(reaction || existingReaction);
   } catch (error) {
     console.error("[MESSAGE_REACTION_POST]", error);
     return new NextResponse("Internal Error", { status: 500 });
