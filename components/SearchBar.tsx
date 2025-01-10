@@ -1,7 +1,8 @@
 'use client'
 
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { FiSearch } from 'react-icons/fi';
+import debounce from 'lodash/debounce';
 
 interface SearchBarProps {
   onSearch: (query: string) => void;
@@ -9,6 +10,27 @@ interface SearchBarProps {
 
 export default function SearchBar({ onSearch }: SearchBarProps) {
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Debounce the search to avoid too many API calls
+  const debouncedSearch = useCallback(
+    debounce((query: string) => {
+      onSearch(query);
+    }, 300),
+    [onSearch]
+  );
+
+  useEffect(() => {
+    // Cleanup the debounced function on unmount
+    return () => {
+      debouncedSearch.cancel();
+    };
+  }, [debouncedSearch]);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const query = e.target.value;
+    setSearchQuery(query);
+    debouncedSearch(query);
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -21,7 +43,7 @@ export default function SearchBar({ onSearch }: SearchBarProps) {
         <input
           type="text"
           value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
+          onChange={handleChange}
           placeholder="Search messages..."
           className="w-full pl-10 pr-4 py-2 rounded-md 
                    bg-gray-700 hover:bg-gray-600

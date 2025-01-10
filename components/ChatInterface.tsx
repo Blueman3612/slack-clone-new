@@ -370,20 +370,28 @@ export default function ChatInterface({
       const data = await response.json();
       
       if (!response.ok) {
-        console.error('Search API error:', data.error);
         throw new Error(data.error || 'Search failed');
       }
       
-      console.log('Search results:', data);
       setSearchResults(data);
     } catch (error) {
       console.error('Search error:', error);
       setSearchResults([]);
-      // Optionally show an error message to the user
     } finally {
       setIsSearching(false);
     }
   };
+
+  const scrollToBottom = useCallback(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
+  }, []);
+
+  // Add effect to scroll when search results change
+  useEffect(() => {
+    if (searchResults.length > 0 || currentSearchQuery === '') {
+      scrollToBottom();
+    }
+  }, [searchResults, currentSearchQuery]);
 
   return (
     <div className="flex h-full">
@@ -404,10 +412,14 @@ export default function ChatInterface({
             </div>
           ) : (
             <div className="py-4">
-              {searchResults.length > 0 ? (
+              {isSearching ? (
+                <div className="flex items-center justify-center h-16 text-gray-500">
+                  Searching...
+                </div>
+              ) : searchResults.length > 0 ? (
                 <div className="py-4">
-                  <div className="px-4 pb-2 text-sm text-gray-500 dark:text-gray-400">
-                    Search results: {searchResults.length} messages
+                  <div className="px-4 pb-2 text-sm text-gray-500">
+                    Found {searchResults.length} results
                   </div>
                   {searchResults.map((message) => (
                     <MessageBubble
@@ -418,9 +430,15 @@ export default function ChatInterface({
                       onThreadClick={() => setSelectedThread(message)}
                       channelId={chatId}
                       chatType={chatType}
+                      chatId={chatId}
                       searchQuery={currentSearchQuery}
                     />
                   ))}
+                  <div ref={messagesEndRef} />
+                </div>
+              ) : currentSearchQuery ? (
+                <div className="flex items-center justify-center h-16 text-gray-500">
+                  No results found
                 </div>
               ) : (
                 <div className="py-4">
@@ -433,6 +451,8 @@ export default function ChatInterface({
                       onThreadClick={() => setSelectedThread(message)}
                       channelId={chatId}
                       chatType={chatType}
+                      chatId={chatId}
+                      searchQuery=""
                     />
                   ))}
                   <div ref={messagesEndRef} />

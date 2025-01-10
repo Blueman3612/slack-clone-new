@@ -245,6 +245,47 @@ export default function MessageBubble({
     return acc;
   }, {} as { [key: string]: { users: string[], count: number, hasReacted: boolean } });
 
+  const renderContent = () => {
+    if (message.fileUrl) {
+      return (
+        <div className="mt-1">
+          {message.fileType?.startsWith('image/') ? (
+            <Image
+              src={message.fileUrl}
+              alt={message.fileName || 'Uploaded image'}
+              width={200}
+              height={200}
+              className="rounded-md"
+            />
+          ) : (
+            <a
+              href={message.fileUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-500 hover:underline"
+            >
+              {message.fileName || 'Download file'}
+            </a>
+          )}
+        </div>
+      );
+    }
+
+    return (
+      <div className="mt-1">
+        {message.content && searchQuery ? (
+          <div className="whitespace-pre-wrap break-words">
+            {highlightText(message.content, searchQuery)}
+          </div>
+        ) : (
+          <div className="whitespace-pre-wrap break-words">
+            {message.content}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="flex items-start space-x-3 group px-4 py-2 hover:bg-black/[0.03] dark:hover:bg-white/[0.02] transition-colors duration-100">
       <div className="relative flex-shrink-0">
@@ -270,12 +311,7 @@ export default function MessageBubble({
           </span>
         </div>
 
-        <div className="mt-1">
-          {searchQuery 
-            ? highlightText(message.content, searchQuery)
-            : message.content
-          }
-        </div>
+        {renderContent()}
 
         {message.reactions && message.reactions.length > 0 && (
           <div className="flex flex-wrap gap-1 mt-2">

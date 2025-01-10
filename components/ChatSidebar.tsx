@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import { Channel, User } from '@prisma/client';
+import Image from 'next/image';
 import UserList from './UserList';
 import UserStatus from './UserStatus';
 import { Plus } from 'lucide-react';
@@ -107,7 +108,18 @@ export default function ChatSidebar() {
   return (
     <div className="flex flex-col h-full w-64 bg-gray-900 text-white">
       <div className="flex-1 p-4 overflow-y-auto">
-        <h1 className="text-2xl font-light tracking-wider mb-8">ACKSLE</h1>
+        <div className="flex items-center gap-4 mb-8">
+          <div className="relative w-16 h-16">
+            <Image
+              src="/Acksle Logo.png"
+              alt="Acksle Logo"
+              fill
+              className="object-contain"
+              priority
+            />
+          </div>
+          <h1 className="text-4xl font-light tracking-wider">ACKSLE</h1>
+        </div>
         
         <div className="mb-8">
           <div className="flex justify-between items-center mb-4">
