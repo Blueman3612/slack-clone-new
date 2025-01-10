@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { pusherServer } from "@/lib/pusher"
 
 export async function GET(req: Request) {
   try {
@@ -23,14 +24,15 @@ export async function GET(req: Request) {
   }
 }
 
-export async function POST(req: Request) {
+export async function POST(request: Request) {
   try {
     const session = await getServerSession(authOptions)
     if (!session?.user) {
       return new NextResponse('Unauthorized', { status: 401 })
     }
 
-    const { emoji, text, expiresAt } = await req.json()
+    const body = await request.json()
+    const { emoji, text } = body
 
     const status = await prisma.userStatus.upsert({
       where: {
@@ -39,24 +41,31 @@ export async function POST(req: Request) {
       update: {
         emoji,
         text,
-        expiresAt: expiresAt ? new Date(expiresAt) : null
       },
       create: {
         userId: session.user.id,
         emoji,
         text,
-        expiresAt: expiresAt ? new Date(expiresAt) : null
+      },
+    })
+
+    // Trigger status update event
+    await pusherServer.trigger('user-status', 'status-update', {
+      userId: session.user.id,
+      status: {
+        emoji,
+        text,
       }
     })
 
     return NextResponse.json(status)
   } catch (error) {
-    console.error('Status update error:', error)
+    console.error("[USER_STATUS_POST]", error)
     return new NextResponse('Internal Error', { status: 500 })
   }
 }
 
-export async function DELETE(req: Request) {
+export async function DELETE(request: Request) {
   try {
     const session = await getServerSession(authOptions)
     if (!session?.user) {
@@ -69,9 +78,15 @@ export async function DELETE(req: Request) {
       }
     })
 
+    // Trigger status clear event
+    await pusherServer.trigger('user-status', 'status-update', {
+      userId: session.user.id,
+      status: null
+    })
+
     return new NextResponse(null, { status: 204 })
   } catch (error) {
-    console.error('Status delete error:', error)
+    console.error("[USER_STATUS_DELETE]", error)
     return new NextResponse('Internal Error', { status: 500 })
   }
 } 

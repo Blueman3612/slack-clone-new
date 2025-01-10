@@ -9,6 +9,8 @@ import { MessageSquare } from 'lucide-react'
 import Image from 'next/image'
 import { pusherClient } from '@/lib/pusher'
 import { highlightText } from '@/utils/highlightText'
+import StatusTooltip from './StatusTooltip'
+import { useUserStatus } from '@/contexts/UserStatusContext'
 
 interface MessageBubbleProps {
   message: Message;
@@ -42,6 +44,9 @@ export default function MessageBubble({
   const [message, setMessage] = useState<Message>(initialMessage)
   const [replyCount, setReplyCount] = useState(initialMessage.replyCount || 0)
   const emojiButtonRef = useRef<HTMLButtonElement>(null)
+  const [showUserStatus, setShowUserStatus] = useState(false)
+  const avatarRef = useRef<HTMLDivElement>(null)
+  const { statuses, fetchStatus } = useUserStatus()
 
   const effectiveChatId = chatType === 'channel' 
     ? message.channelId 
@@ -303,9 +308,21 @@ export default function MessageBubble({
     };
   }, [message.id]);
 
+  // Add status fetching effect
+  useEffect(() => {
+    if (showUserStatus && message.user?.id && !statuses[message.user.id]) {
+      fetchStatus(message.user.id);
+    }
+  }, [showUserStatus, message.user?.id, fetchStatus, statuses]);
+
   return (
     <div className="flex items-start space-x-3 group px-4 py-2 hover:bg-black/[0.03] dark:hover:bg-white/[0.02] transition-colors duration-100">
-      <div className="relative flex-shrink-0">
+      <div 
+        ref={avatarRef}
+        className="relative flex-shrink-0"
+        onMouseEnter={() => setShowUserStatus(true)}
+        onMouseLeave={() => setShowUserStatus(false)}
+      >
         <Image
           src={userImage}
           alt={userName}
@@ -315,6 +332,13 @@ export default function MessageBubble({
         />
         {isOnline && (
           <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white dark:border-gray-900 rounded-full"></div>
+        )}
+        {showUserStatus && message.user?.id && statuses[message.user.id] && avatarRef.current && (
+          <StatusTooltip 
+            emoji={statuses[message.user.id]?.emoji} 
+            text={statuses[message.user.id]?.text}
+            targetRef={avatarRef.current}
+          />
         )}
       </div>
 

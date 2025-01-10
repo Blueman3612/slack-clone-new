@@ -8,6 +8,7 @@ import Image from 'next/image';
 import UserList from './UserList';
 import UserStatus from './UserStatus';
 import { Plus } from 'lucide-react';
+import { useOnlineUsers } from '@/contexts/OnlineUsersContext';
 
 export default function ChatSidebar() {
   const { data: session, status } = useSession();
@@ -19,6 +20,7 @@ export default function ChatSidebar() {
   const currentRecipientId = searchParams.get('recipientId');
   const [isCreating, setIsCreating] = useState(false);
   const [newChannelName, setNewChannelName] = useState('');
+  const { onlineUsers } = useOnlineUsers();
 
   useEffect(() => {
     const fetchUsers = async () => {
@@ -163,9 +165,10 @@ export default function ChatSidebar() {
 
         <UserList
           initialUsers={users}
-          currentUserId={session.user.id}
+          currentUserId={session?.user?.id || ''}
           onUserClick={(userId) => router.push(`/chat?recipientId=${userId}`)}
           selectedUserId={currentRecipientId}
+          onlineUsers={onlineUsers}
         />
       </div>
 
