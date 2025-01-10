@@ -9,6 +9,9 @@ import { useOnlineUsers } from '@/contexts/OnlineUsersContext'
 import TypingIndicator from './TypingIndicator'
 import ThreadView from './ThreadView'
 import axios from 'axios'
+import { FiPaperclip } from 'react-icons/fi';
+import FilePreview from './FilePreview';
+import SearchBar from './SearchBar';
 
 export default function ChatInterface({ 
   chatId, 
@@ -34,6 +37,11 @@ export default function ChatInterface({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [chatName, setChatName] = useState<string>('');
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [searchResults, setSearchResults] = useState<Message[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [currentSearchQuery, setCurrentSearchQuery] = useState('');
 
   // Handle typing events
   const handleTyping = async () => {
@@ -301,9 +309,86 @@ export default function ChatInterface({
     }
   };
 
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file || !chatId) return;
+
+    setIsUploading(true);
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const response = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) throw new Error('Upload failed');
+
+      const uploadedFile = await response.json();
+      
+      // Send message with file attachment
+      await fetch('/api/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          content: '',
+          fileUrl: uploadedFile.url,
+          fileName: uploadedFile.name,
+          fileType: uploadedFile.type,
+          fileSize: uploadedFile.size,
+          ...(chatType === 'channel' 
+            ? { channelId: chatId }
+            : { receiverId: chatId }
+          ),
+        }),
+      });
+    } catch (error) {
+      console.error('Upload error:', error);
+      // You might want to add a toast notification here
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const handleSearch = async (query: string) => {
+    setCurrentSearchQuery(query);
+    if (!query.trim()) {
+      setSearchResults([]);
+      setIsSearching(false);
+      return;
+    }
+
+    setIsSearching(true);
+    try {
+      const response = await fetch(`/api/messages/search?${
+        chatType === 'channel' ? 'channelId' : 'receiverId'
+      }=${chatId}&query=${encodeURIComponent(query)}`);
+      
+      const data = await response.json();
+      
+      if (!response.ok) {
+        console.error('Search API error:', data.error);
+        throw new Error(data.error || 'Search failed');
+      }
+      
+      console.log('Search results:', data);
+      setSearchResults(data);
+    } catch (error) {
+      console.error('Search error:', error);
+      setSearchResults([]);
+      // Optionally show an error message to the user
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
   return (
     <div className="flex h-full">
       <div className="flex-1 flex flex-col h-full relative">
+        <SearchBar onSearch={handleSearch} />
         <div 
           ref={chatContainerRef}
           className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-600"
@@ -319,18 +404,40 @@ export default function ChatInterface({
             </div>
           ) : (
             <div className="py-4">
-              {messages?.map((message) => (
-                <MessageBubble
-                  key={message.id}
-                  message={message}
-                  isOwn={message.userId === currentUserId}
-                  onlineUsers={onlineUsers}
-                  onThreadClick={() => setSelectedThread(message)}
-                  channelId={chatId}
-                  chatType={chatType}
-                />
-              ))}
-              <div ref={messagesEndRef} />
+              {searchResults.length > 0 ? (
+                <div className="py-4">
+                  <div className="px-4 pb-2 text-sm text-gray-500 dark:text-gray-400">
+                    Search results: {searchResults.length} messages
+                  </div>
+                  {searchResults.map((message) => (
+                    <MessageBubble
+                      key={message.id}
+                      message={message}
+                      isOwn={message.userId === currentUserId}
+                      onlineUsers={onlineUsers}
+                      onThreadClick={() => setSelectedThread(message)}
+                      channelId={chatId}
+                      chatType={chatType}
+                      searchQuery={currentSearchQuery}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div className="py-4">
+                  {messages?.map((message) => (
+                    <MessageBubble
+                      key={message.id}
+                      message={message}
+                      isOwn={message.userId === currentUserId}
+                      onlineUsers={onlineUsers}
+                      onThreadClick={() => setSelectedThread(message)}
+                      channelId={chatId}
+                      chatType={chatType}
+                    />
+                  ))}
+                  <div ref={messagesEndRef} />
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -338,20 +445,42 @@ export default function ChatInterface({
         <div className="sticky bottom-0 left-0 right-0 bg-white dark:bg-gray-900 border-t dark:border-gray-700">
           <TypingIndicator typingUsers={typingUsers} />
           <form onSubmit={handleSubmit} className="p-4">
-            <input
-              type="text"
-              value={message}
-              onChange={(e) => {
-                setMessage(e.target.value);
-                handleTyping();
-              }}
-              placeholder={chatName ? `Message ${chatName}` : 'Type a message...'}
-              className="w-full p-3 rounded-lg border dark:border-gray-600 
-                       bg-white dark:bg-gray-800 
-                       text-gray-900 dark:text-white
-                       placeholder-gray-500 dark:placeholder-gray-400
-                       focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
+            <div className="relative flex items-center">
+              <input
+                type="text"
+                value={message}
+                onChange={(e) => {
+                  setMessage(e.target.value);
+                  handleTyping();
+                }}
+                placeholder={chatName ? `Message ${chatName}` : 'Type a message...'}
+                className="w-full p-3 pr-12 rounded-lg border dark:border-gray-600 
+                         bg-white dark:bg-gray-800 
+                         text-gray-900 dark:text-white
+                         placeholder-gray-500 dark:placeholder-gray-400
+                         focus:outline-none focus:ring-2 focus:ring-blue-500"
+                disabled={isUploading}
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="absolute right-3 p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded"
+                disabled={isUploading}
+              >
+                <FiPaperclip className="h-5 w-5 text-gray-500 dark:text-gray-400" />
+              </button>
+              <input
+                type="file"
+                ref={fileInputRef}
+                className="hidden"
+                onChange={handleFileUpload}
+              />
+            </div>
+            {isUploading && (
+              <div className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                Uploading file...
+              </div>
+            )}
           </form>
         </div>
       </div>

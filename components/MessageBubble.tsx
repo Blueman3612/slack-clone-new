@@ -8,6 +8,7 @@ import EmojiPicker from './EmojiPicker'
 import { MessageSquare } from 'lucide-react'
 import Image from 'next/image'
 import { pusherClient } from '@/lib/pusher'
+import { highlightText } from '@/utils/highlightText'
 
 interface MessageBubbleProps {
   message: Message;
@@ -17,6 +18,7 @@ interface MessageBubbleProps {
   showThread?: boolean;
   chatType: 'channel' | 'dm';
   chatId: string;
+  searchQuery?: string;
 }
 
 const debug = (message: string) => {
@@ -32,7 +34,8 @@ export default function MessageBubble({
   onThreadClick,
   showThread = true,
   chatType,
-  chatId
+  chatId,
+  searchQuery = ''
 }: MessageBubbleProps) {
   const { data: session } = useSession()
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
@@ -267,9 +270,12 @@ export default function MessageBubble({
           </span>
         </div>
 
-        <p className="text-sm text-gray-900 dark:text-gray-100 whitespace-pre-wrap">
-          {message.content}
-        </p>
+        <div className="mt-1">
+          {searchQuery 
+            ? highlightText(message.content, searchQuery)
+            : message.content
+          }
+        </div>
 
         {message.reactions && message.reactions.length > 0 && (
           <div className="flex flex-wrap gap-1 mt-2">

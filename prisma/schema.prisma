@@ -67,6 +67,12 @@ model Message {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   
+  // Add file attachment fields
+  fileUrl   String?
+  fileName  String?
+  fileType  String?
+  fileSize  Int?
+  
   // User who sent the message
   userId    String
   user      User     @relation(fields: [userId], references: [id])

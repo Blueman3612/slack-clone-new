@@ -7,13 +7,19 @@ import { prisma } from "@/lib/prisma";
 export default async function ChatPage({
   searchParams,
 }: {
-  searchParams: { [key: string]: string | string[] | undefined }
+  searchParams: { [key: string]: string | undefined };
 }) {
   const session = await getServerSession(authOptions);
-  console.log("Server ", "Chat page params:", searchParams);
+  if (!session?.user) {
+    redirect('/');
+  }
+
+  // Access searchParams directly instead of using URLSearchParams
+  const channelId = searchParams.channelId;
+  const recipientId = searchParams.recipientId;
 
   // Only redirect if there are no search params
-  if (!searchParams.channelId && !searchParams.recipientId) {
+  if (!channelId && !recipientId) {
     const generalChannel = await prisma.channel.findFirst({
       where: {
         name: 'general'
@@ -23,21 +29,6 @@ export default async function ChatPage({
     if (generalChannel) {
       redirect(`/chat?channelId=${generalChannel.id}`);
     }
-  }
-
-  // Convert searchParams to string or undefined
-  const params = await searchParams;
-  const channelId = typeof params.channelId === 'string' ? params.channelId : undefined;
-  const recipientId = typeof params.recipientId === 'string' ? params.recipientId : undefined;
-
-  console.log('Chat page params:', { channelId, recipientId });
-
-  if (!channelId && !recipientId) {
-    return (
-      <div className="flex-1 flex items-center justify-center">
-        <p className="text-gray-500">Select a channel or user to start chatting</p>
-      </div>
-    );
   }
 
   // Fetch messages based on chat type
