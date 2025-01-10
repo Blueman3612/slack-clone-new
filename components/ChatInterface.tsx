@@ -177,6 +177,27 @@ export default function ChatInterface({
       }
     });
 
+    // Message deletion handler without auto-scroll
+    channel.bind('message-deleted', ({ messageId, threadDeleted }: { messageId: string, threadDeleted: boolean }) => {
+      if (currentChannelRef.current === chatId) {
+        setMessages((currentMessages) => 
+          currentMessages.filter(message => {
+            // Remove the deleted message and all its replies if it's a thread
+            if (threadDeleted) {
+              return message.id !== messageId && message.parentId !== messageId;
+            }
+            // Just remove the single message
+            return message.id !== messageId;
+          })
+        );
+
+        // Close thread view if the deleted message was being viewed
+        if (selectedThread?.id === messageId) {
+          setSelectedThread(null);
+        }
+      }
+    });
+
     // Handle thread updates
     channel.bind('update-thread', (data: {
       messageId: string;
@@ -235,7 +256,7 @@ export default function ChatInterface({
         clearTimeout(typingTimeoutRef.current);
       }
     };
-  }, [chatId, chatType, currentUserId]);
+  }, [chatId, chatType, currentUserId, selectedThread?.id]);
 
   // Reset messages when changing chats
   useEffect(() => {
@@ -244,7 +265,7 @@ export default function ChatInterface({
     currentChannelRef.current = chatId;
   }, [chatId]);
 
-  // Smooth scroll for new messages in current chat
+  // Modify this effect to only scroll for new messages, not deletions
   useEffect(() => {
     if (messages.length > initialMessages.length) {
       smoothScrollToBottom();

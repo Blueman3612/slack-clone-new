@@ -202,6 +202,44 @@ export default function ThreadView({
     };
   }, [parentMessage.id]);
 
+  useEffect(() => {
+    const channelName = chatType === 'channel'
+      ? `channel-${chatId}`
+      : `dm-${[currentUserId, chatId].sort().join('-')}`;
+
+    const channel = pusherClient.subscribe(channelName);
+
+    // Handle new thread replies
+    channel.bind('new-message', (message: Message) => {
+      if (message.threadId === parentMessage.id) {
+        setMessages(current => {
+          if (current.some(m => m.id === message.id)) {
+            return current;
+          }
+          return [...current, message];
+        });
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }
+    });
+
+    // Handle message deletions in thread
+    channel.bind('message-deleted', ({ messageId }: { messageId: string }) => {
+      setMessages(current => current.filter(reply => reply.id !== messageId));
+    });
+
+    return () => {
+      pusherClient.unsubscribe(channelName);
+      channel.unbind_all();
+    };
+  }, [chatId, chatType, currentUserId, parentMessage.id]);
+
+  // Add instant scroll to bottom when thread loads
+  useEffect(() => {
+    if (!isLoading && messages.length > 0) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
+    }
+  }, [isLoading, messages.length]);
+
   return (
     <div className="w-[576px] border-l border-gray-200 dark:border-gray-700 flex flex-col h-full bg-white dark:bg-gray-900">
       {/* Thread header */}

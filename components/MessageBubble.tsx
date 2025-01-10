@@ -5,12 +5,13 @@ import { format, isToday } from 'date-fns'
 import { Message, Reaction } from '@/types'
 import { useSession } from 'next-auth/react'
 import EmojiPicker from './EmojiPicker'
-import { MessageSquare, Shield } from 'lucide-react'
+import { MessageSquare, Shield, Trash2 } from 'lucide-react'
 import Image from 'next/image'
 import { pusherClient } from '@/lib/pusher'
 import { highlightText } from '@/utils/highlightText'
 import StatusTooltip from './StatusTooltip'
 import { useUserStatus } from '@/contexts/UserStatusContext'
+import { useRole } from '@/hooks/useRole'
 
 interface MessageBubbleProps {
   message: Message;
@@ -40,6 +41,7 @@ export default function MessageBubble({
   searchQuery = ''
 }: MessageBubbleProps) {
   const { data: session } = useSession()
+  const { isAdmin } = useRole()
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
   const [message, setMessage] = useState<Message>(initialMessage)
   const [replyCount, setReplyCount] = useState(initialMessage.replyCount || 0)
@@ -292,19 +294,24 @@ export default function MessageBubble({
     );
   };
 
-  // Subscribe to thread count updates
+  // Subscribe to thread count updates and message deletions
   useEffect(() => {
-    const channelName = `thread-${message.id}`;
-    const channel = pusherClient.subscribe(channelName);
+    const threadChannel = `thread-${message.id}`;
+    const channel = pusherClient.subscribe(threadChannel);
 
-    channel.bind('thread-count-update', (data: { replyCount: number }) => {
-      console.log('Received thread count update:', data);
+    // Handle thread count updates from new messages and deletions
+    const handleThreadCountUpdate = (data: { replyCount: number }) => {
+      debug(`Received thread count update for ${message.id}: ${data.replyCount}`);
       setReplyCount(data.replyCount);
-    });
+    };
+
+    channel.bind('thread-count-update', handleThreadCountUpdate);
+    channel.bind('thread-reply-deleted', handleThreadCountUpdate);
 
     return () => {
-      channel.unbind_all();
-      pusherClient.unsubscribe(channelName);
+      channel.unbind('thread-count-update', handleThreadCountUpdate);
+      channel.unbind('thread-reply-deleted', handleThreadCountUpdate);
+      pusherClient.unsubscribe(threadChannel);
     };
   }, [message.id]);
 
@@ -314,6 +321,27 @@ export default function MessageBubble({
       fetchStatus(message.user.id);
     }
   }, [showUserStatus, message.user?.id, fetchStatus, statuses]);
+
+  const handleDelete = async () => {
+    if (!session?.user?.id) return;
+    
+    try {
+      const response = await fetch(`/api/messages/${message.id}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to delete message');
+      }
+
+      debug('Message deleted successfully');
+    } catch (error) {
+      debug('Error deleting message:', error);
+    }
+  };
+
+  // Determine if delete button should be shown
+  const showDeleteButton = isOwn || (isAdmin && chatType === 'channel');
 
   return (
     <div className="flex items-start space-x-3 group px-4 py-2 hover:bg-black/[0.03] dark:hover:bg-white/[0.02] transition-colors duration-100">
@@ -417,6 +445,16 @@ export default function MessageBubble({
             title="Reply in thread"
           >
             <MessageSquare className="w-4 h-4" />
+          </button>
+        )}
+
+        {showDeleteButton && (
+          <button
+            onClick={handleDelete}
+            className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-gray-500 hover:text-red-600 dark:hover:text-red-400"
+            title={isAdmin && !isOwn ? "Delete message (Admin)" : "Delete message"}
+          >
+            <Trash2 className="w-4 h-4" />
           </button>
         )}
       </div>
