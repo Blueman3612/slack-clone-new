@@ -272,24 +272,20 @@ export default function ChatInterface({
     }
   }, [messages.length, initialMessages.length]);
 
-  // Add effect to fetch channel or user name
+  // Fetch chat name when component mounts or chatId changes
   useEffect(() => {
     const fetchChatName = async () => {
-      if (!chatId) return;
-      
       try {
         if (chatType === 'channel') {
           const response = await fetch(`/api/channels/${chatId}`);
-          if (response.ok) {
-            const channel = await response.json();
-            setChatName(`#${channel.name}`);
-          }
+          if (!response.ok) throw new Error('Failed to fetch channel');
+          const channel = await response.json();
+          setChatName(`#${channel.name}`);
         } else {
           const response = await fetch(`/api/users/${chatId}`);
-          if (response.ok) {
-            const user = await response.json();
-            setChatName(user.name);
-          }
+          if (!response.ok) throw new Error('Failed to fetch user');
+          const user = await response.json();
+          setChatName(user.name);
         }
       } catch (error) {
         console.error('Error fetching chat name:', error);
@@ -298,7 +294,6 @@ export default function ChatInterface({
     };
 
     fetchChatName();
-    // Add chatId and chatType to dependency array
   }, [chatId, chatType]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -494,7 +489,7 @@ export default function ChatInterface({
                   setMessage(e.target.value);
                   handleTyping();
                 }}
-                placeholder={chatName ? `Message ${chatName}` : 'Type a message...'}
+                placeholder={`Message ${chatName || 'the channel'}`}
                 className="w-full p-3 pr-12 rounded-lg border dark:border-gray-600 
                          bg-white dark:bg-gray-800 
                          text-gray-900 dark:text-white
