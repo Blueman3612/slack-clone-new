@@ -13,6 +13,7 @@ import { useRole } from '@/hooks/useRole';
 import { cn } from '@/lib/utils';
 import PusherClient from 'pusher-js';
 import { Session } from 'next-auth';
+import { BluemanChatButton } from './BluemanChatButton';
 
 interface Notification {
   count: number;
@@ -342,6 +343,10 @@ export default function ChatSidebar() {
           onlineUsers={onlineUsers}
           notifications={notifications}
         />
+      </div>
+
+      <div className="mt-4 px-3">
+        <BluemanChatButton />
       </div>
 
       <UserStatus />

@@ -96,3 +96,8 @@ storybook-static/
 # Cache directories
 .cache/
 .next/cache/
+
+# Data folder and all its contents
+/data/*
+# But keep the folder structure by including an empty .gitkeep file
+!/data/.gitkeep

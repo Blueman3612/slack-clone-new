@@ -1,0 +1,7 @@
+# Add directories or file patterns to ignore during indexing (e.g. foo/ or *.csv)
+# Local env files
+.env
+.env*.local
+.env.development
+.env.test
+.env.production
