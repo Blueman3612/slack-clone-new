@@ -15,17 +15,21 @@ import SearchBar from './SearchBar';
 import { useRouter } from 'next/navigation';
 import { LogOut } from 'lucide-react';
 
-export default function ChatInterface({ 
-  chatId, 
-  chatType, 
-  currentUserId, 
-  initialMessages = []
-}: {
+interface Props {
   chatId: string;
   chatType: 'channel' | 'dm';
   currentUserId: string;
   initialMessages: Message[];
-}) {
+  initialLastReadTimestamp?: string;
+}
+
+export default function ChatInterface({ 
+  chatId, 
+  chatType, 
+  currentUserId, 
+  initialMessages = [],
+  initialLastReadTimestamp
+}: Props) {
   const { data: session } = useSession();
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [message, setMessage] = useState('');
@@ -47,6 +51,20 @@ export default function ChatInterface({
   const router = useRouter();
   const [pendingMessageId, setPendingMessageId] = useState<string | null>(null);
   const [shouldScrollToBottom, setShouldScrollToBottom] = useState(true);
+  const [lastReadTimestamp, setLastReadTimestamp] = useState<string | null>(
+    initialLastReadTimestamp || null
+  );
+
+  // Add this function to parse timestamps safely
+  const parseTimestamp = (timestamp: string | null): number => {
+    if (!timestamp) return 0;
+    // If it's already a number (stored as string), parse it directly
+    if (!isNaN(Number(timestamp))) {
+      return Number(timestamp);
+    }
+    // Otherwise try to parse as ISO date string
+    return new Date(timestamp).getTime();
+  };
 
   // Handle typing events
   const handleTyping = async () => {
@@ -484,15 +502,60 @@ export default function ChatInterface({
 
   // Modify the effect that handles new messages
   useEffect(() => {
+    // Only set shouldScrollToBottom for truly new messages, not when loading from search
     if (!pendingMessageId && !currentSearchQuery && messages.length > initialMessages.length) {
-      setShouldScrollToBottom(true);
+      const isNewMessage = messages[messages.length - 1]?.createdAt > 
+        new Date(Date.now() - 1000).toISOString(); // Message created in last second
+      
+      if (isNewMessage) {
+        setShouldScrollToBottom(true);
+      }
     }
-  }, [messages.length, initialMessages.length, pendingMessageId, currentSearchQuery]);
+  }, [messages.length, initialMessages.length, pendingMessageId, currentSearchQuery, messages]);
 
   // Update the thread click handler
   const handleThreadClick = (message: Message) => {
     setSelectedThread(message);
   };
+
+  // Add this function to handle scrolling to unread messages
+  const scrollToUnreadLine = () => {
+    const unreadMarker = document.querySelector('.unread-messages-line');
+    if (unreadMarker) {
+      unreadMarker.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  };
+
+  // Add this effect to scroll to unread line when it appears
+  useEffect(() => {
+    if (lastReadTimestamp) {
+      scrollToUnreadLine();
+    }
+  }, [lastReadTimestamp]);
+
+  // Add this effect to update last read timestamp when leaving the channel
+  useEffect(() => {
+    return () => {
+      if (messages.length > 0) {
+        const lastMessageTime = new Date(messages[messages.length - 1].createdAt).getTime();
+        console.log('Storing last read timestamp:', lastMessageTime);
+        localStorage.setItem(`lastRead_${chatId}`, lastMessageTime.toString());
+      }
+    };
+  }, [chatId, messages]);
+
+  // Update the timestamp loading effect
+  useEffect(() => {
+    const storedTimestamp = localStorage.getItem(`lastRead_${chatId}`);
+    console.log('Loading stored timestamp:', {
+      chatId,
+      storedTimestamp,
+      parsed: parseTimestamp(storedTimestamp)
+    });
+    if (storedTimestamp) {
+      setLastReadTimestamp(storedTimestamp);
+    }
+  }, [chatId]);
 
   return (
     <div className="flex h-full w-full overflow-hidden">
@@ -566,17 +629,55 @@ export default function ChatInterface({
               ) : (
                 // Regular message display
                 <div>
-                  {messages?.map((message) => (
-                    <div key={message.id} id={`message-${message.id}`}>
-                      <MessageBubble
-                        message={message}
-                        isOwn={message.userId === currentUserId}
-                        onThreadClick={() => setSelectedThread(message)}
-                        chatType={chatType}
-                        chatId={chatId}
-                      />
-                    </div>
-                  ))}
+                  {messages?.map((message, index) => {
+                    const messageTime = new Date(message.createdAt).getTime();
+                    const prevMessageTime = messages[index - 1] 
+                      ? new Date(messages[index - 1].createdAt).getTime() 
+                      : 0;
+                    const lastReadTime = parseTimestamp(lastReadTimestamp);
+
+                    const showUnreadLine = lastReadTimestamp && 
+                      prevMessageTime < lastReadTime && 
+                      messageTime > lastReadTime;
+
+                    // Add more detailed debug logging
+                    console.log('Message timestamp check:', {
+                      messageId: message.id,
+                      messageTime,
+                      prevMessageTime,
+                      lastReadTime,
+                      lastReadTimestamp,
+                      showUnreadLine,
+                      comparison: {
+                        prevLessThanRead: prevMessageTime < lastReadTime,
+                        msgGreaterThanRead: messageTime > lastReadTime
+                      }
+                    });
+
+                    return (
+                      <div key={message.id}>
+                        {showUnreadLine && (
+                          <div className="relative my-4 unread-messages-line">
+                            <div className="absolute inset-0 flex items-center">
+                              <div className="w-full border-t-2 border-red-500" />
+                            </div>
+                            <div className="relative flex justify-center">
+                              <span className="bg-gray-800 px-2 text-xs text-red-500 font-semibold">
+                                New Messages
+                              </span>
+                            </div>
+                          </div>
+                        )}
+                        <MessageBubble
+                          message={message}
+                          isOwn={message.userId === currentUserId}
+                          onThreadClick={() => setSelectedThread(message)}
+                          chatType={chatType}
+                          chatId={chatId}
+                        />
+                      </div>
+                    );
+                  })}
                 </div>
               )}
               <div ref={messagesEndRef} />

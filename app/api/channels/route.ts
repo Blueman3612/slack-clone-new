@@ -26,6 +26,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const session = await getServerSession(authOptions);
+    
     if (!session?.user) {
       return new NextResponse("Unauthorized", { status: 401 });
     }
@@ -36,22 +37,33 @@ export async function POST(request: Request) {
       select: { role: true }
     });
 
-    if (user?.role !== "ADMIN") {
-      return new NextResponse("Forbidden: Only admins can create channels", { status: 403 });
+    if (user?.role !== 'ADMIN') {
+      return new NextResponse("Forbidden - Admin access required", { status: 403 });
     }
 
     const body = await request.json();
     const { name } = body;
 
     if (!name) {
-      return new NextResponse("Name is required", { status: 400 });
+      return new NextResponse("Channel name is required", { status: 400 });
+    }
+
+    // Check if channel already exists
+    const existingChannel = await prisma.channel.findFirst({
+      where: { name }
+    });
+
+    if (existingChannel) {
+      return new NextResponse("Channel already exists", { status: 409 });
     }
 
     const channel = await prisma.channel.create({
       data: {
         name,
-        members: {
-          connect: { id: session.user.id }
+        server: {
+          connect: {
+            name: 'General Server'
+          }
         }
       }
     });

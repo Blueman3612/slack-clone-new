@@ -1,14 +1,17 @@
 import { useSession } from 'next-auth/react';
-import { isAdmin, canManageUsers, canManageChannels } from '@/lib/roles';
 
 export function useRole() {
   const { data: session } = useSession();
-  const userRole = session?.user?.role as string | undefined;
+  
+  // Add debug logging
+  console.log('useRole hook:', {
+    sessionData: session,
+    userRole: session?.user?.role,
+    isAdmin: session?.user?.role === 'ADMIN'
+  });
 
   return {
-    role: userRole,
-    isAdmin: isAdmin(userRole),
-    canManageUsers: canManageUsers(userRole),
-    canManageChannels: canManageChannels(userRole),
+    isAdmin: session?.user?.role === 'ADMIN',
+    role: session?.user?.role
   };
 } 
