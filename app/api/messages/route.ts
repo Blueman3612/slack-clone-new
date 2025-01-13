@@ -86,48 +86,76 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session?.user) {
-      return new NextResponse("Unauthorized", { status: 401 });
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const body = await request.json();
     const { content, channelId, receiverId } = body;
 
-    if (!content || (!channelId && !receiverId)) {
-      return new NextResponse("Missing required fields", { status: 400 });
+    console.log('Message creation attempt:', { content, channelId, receiverId });
+
+    if (!content?.trim()) {
+      return NextResponse.json({ error: "Message content is required" }, { status: 400 });
     }
 
+    // Verify user exists
+    const user = await prisma.user.findUnique({
+      where: { id: session.user.id }
+    });
+
+    if (!user) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+
+    // Verify channel exists if channelId is provided
+    if (channelId) {
+      const channel = await prisma.channel.findUnique({
+        where: { id: channelId }
+      });
+      
+      if (!channel) {
+        return NextResponse.json({ error: "Channel not found" }, { status: 404 });
+      }
+    }
+
+    // Verify receiver exists if receiverId is provided
+    if (receiverId) {
+      const receiver = await prisma.user.findUnique({
+        where: { id: receiverId }
+      });
+
+      if (!receiver) {
+        return NextResponse.json({ error: "Receiver not found" }, { status: 404 });
+      }
+    }
+
+    // Create message with proper data structure
+    const messageData = {
+      content: content.trim(),
+      userId: session.user.id,
+      isThreadStarter: false,
+      replyCount: 0,
+      ...(channelId ? { channelId } : {}),
+      ...(receiverId ? { receiverId } : {})
+    };
+
+    console.log('Creating message with data:', messageData);
+
     const message = await prisma.message.create({
-      data: {
-        content,
-        userId: session.user.id,
-        ...(channelId ? { channelId } : { receiverId }),
-      },
+      data: messageData,
       include: {
         user: {
           select: {
             id: true,
             name: true,
-            email: true,
-            image: true,
-            role: true,
-          },
-        },
-        reactions: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                name: true,
-                image: true,
-              },
-            },
-          },
-        },
-      },
+            image: true
+          }
+        }
+      }
     });
 
-    // Determine channel name based on message type
+    // Trigger Pusher event for real-time updates
     const channelName = channelId 
       ? `channel-${channelId}`
       : `dm-${[session.user.id, receiverId].sort().join('-')}`;
@@ -136,7 +164,16 @@ export async function POST(request: Request) {
 
     return NextResponse.json(message);
   } catch (error) {
-    console.error("[MESSAGES_POST]", error);
-    return new NextResponse("Internal Error", { status: 500 });
+    console.error("[MESSAGES_POST]", {
+      error: error instanceof Error ? {
+        message: error.message,
+        stack: error.stack,
+        data: error['data'] // Capture Prisma error data if available
+      } : error
+    });
+
+    return NextResponse.json({ 
+      error: error instanceof Error ? error.message : "Failed to send message" 
+    }, { status: 500 });
   }
 } 

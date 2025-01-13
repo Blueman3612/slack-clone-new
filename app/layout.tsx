@@ -1,8 +1,15 @@
 import './globals.css'
 import type { Metadata } from 'next'
 import { Inter } from 'next/font/google'
-import Providers from '@/components/Providers'
+import { ThemeProvider } from '@/components/providers/theme-provider'
+import { Toaster } from '@/components/ui/toaster'
 import { UserStatusProvider } from '@/contexts/UserStatusContext'
+import { SessionProvider } from '@/components/providers/session-provider'
+import { getServerSession } from 'next-auth'
+import { authOptions } from '@/lib/auth'
+import { cn } from '@/lib/utils'
+import { OnlineUsersProvider } from '@/contexts/OnlineUsersContext'
+import { redirect } from 'next/navigation'
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -11,19 +18,27 @@ export const metadata: Metadata = {
   description: 'A real-time chat application',
 }
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
+  const session = await getServerSession(authOptions);
+
+  // Create a middleware.ts file if you haven't already
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={inter.className}>
-        <Providers>
-          <UserStatusProvider>
-            {children}
-          </UserStatusProvider>
-        </Providers>
+      <body className={cn("bg-white dark:bg-gray-900", inter.className)}>
+        <SessionProvider session={session}>
+          <ThemeProvider attribute="class" defaultTheme="dark">
+            <OnlineUsersProvider>
+              <UserStatusProvider>
+                {children}
+                <Toaster />
+              </UserStatusProvider>
+            </OnlineUsersProvider>
+          </ThemeProvider>
+        </SessionProvider>
       </body>
     </html>
   )

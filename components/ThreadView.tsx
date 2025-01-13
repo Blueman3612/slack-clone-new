@@ -23,7 +23,7 @@ export default function ThreadView({
   onClose,
   chatType,
   chatId,
-  currentUserId 
+  currentUserId
 }: ThreadViewProps) {
   const { data: session } = useSession()
   const [messages, setMessages] = useState<Message[]>([])
@@ -241,7 +241,7 @@ export default function ThreadView({
   }, [isLoading, messages.length]);
 
   return (
-    <div className="w-[576px] border-l border-gray-200 dark:border-gray-700 flex flex-col h-full bg-white dark:bg-gray-900">
+    <div className="flex flex-col h-full bg-white dark:bg-gray-900">
       {/* Thread header */}
       <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
         <h2 className="text-lg font-semibold">Thread</h2>

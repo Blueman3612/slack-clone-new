@@ -9,123 +9,87 @@ export default async function ChatPage({
 }: {
   searchParams: { [key: string]: string | undefined }
 }) {
-  const { channelId, userId } = searchParams;
-
-  // Only redirect if there are no search params at all
-  if (!channelId && !userId) {
-    const generalChannel = await prisma.channel.findFirst({
-      where: {
-        name: 'general'
-      }
-    });
-
-    if (generalChannel) {
-      redirect(`/chat?channelId=${generalChannel.id}`);
-    } else {
-      // Fallback to first channel if #general doesn't exist
-      const defaultChannel = await prisma.channel.findFirst({
-        orderBy: {
-          name: 'asc'
-        }
-      });
-
-      if (defaultChannel) {
-        redirect(`/chat?channelId=${defaultChannel.id}`);
-      }
-    }
-  }
-
   const session = await getServerSession(authOptions);
   if (!session?.user) {
     redirect('/');
   }
 
-  // Fetch messages based on chat type
-  const messages = await prisma.message.findMany({
-    where: channelId 
-      ? {
-          channelId,
-          threadId: null
-        } 
-      : {
-          AND: [
-            { channelId: null },
-            { threadId: null },
-            {
-              OR: [
-                {
-                  userId: session.user.id,
-                  receiverId: userId,
-                },
-                {
-                  userId: userId,
-                  receiverId: session.user.id,
-                }
-              ]
-            }
-          ]
-        },
-    include: {
-      user: {
-        select: {
-          id: true,
-          name: true,
-          email: true,
-          image: true,
-        },
-      },
-      reactions: {
-        include: {
-          user: {
-            select: {
-              id: true,
-              name: true,
-              image: true,
-            },
-          },
-        },
-      },
-      threadMessages: {
-        select: {
-          id: true,
-        },
-      },
+  // Ensure user exists in database
+  const user = await prisma.user.upsert({
+    where: { 
+      id: session.user.id 
     },
-    orderBy: {
-      createdAt: 'asc',
+    update: {
+      name: session.user.name,
+      email: session.user.email,
+      image: session.user.image
     },
+    create: {
+      id: session.user.id,
+      name: session.user.name,
+      email: session.user.email,
+      image: session.user.image,
+      role: 'USER'
+    }
   });
 
-  // Transform messages to include reply count
-  const messagesWithThreadInfo = messages.map(message => ({
-    ...message,
-    replyCount: message.threadMessages.length,
-    threadMessages: undefined,
-  }));
+  // Await the searchParams
+  const params = await Promise.resolve(searchParams);
+  const { channelId, userId } = params;
 
-  // Fetch recipient details if this is a DM
-  let recipient = null;
-  if (userId) {
-    recipient = await prisma.user.findUnique({
-      where: { id: userId },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        image: true,
+  // Only redirect if there are no search params at all
+  if (!channelId && !userId) {
+    // Find the general channel
+    const generalChannel = await prisma.channel.findFirst({
+      where: {
+        name: 'general'
       },
+      include: {
+        server: {
+          include: {
+            members: true
+          }
+        }
+      }
     });
+
+    if (!generalChannel) {
+      console.error('No general channel found');
+      return <div>Error: No general channel found. Please contact administrator.</div>;
+    }
+
+    // Verify user is a member of the server
+    const isMember = generalChannel.server.members.some(member => member.id === user.id);
+    if (!isMember) {
+      console.log('Adding user to server:', {
+        userId: user.id,
+        serverId: generalChannel.server.id
+      });
+
+      // Add user to server
+      await prisma.server.update({
+        where: { 
+          id: generalChannel.server.id 
+        },
+        data: {
+          members: {
+            connect: { 
+              id: user.id 
+            }
+          }
+        }
+      });
+    }
+
+    redirect(`/chat?channelId=${generalChannel.id}`);
   }
 
   return (
-    <div className="flex-1 bg-white dark:bg-gray-800">
-      <ChatInterface
-        chatId={channelId || userId}
-        chatType={channelId ? 'channel' : 'dm'}
-        currentUserId={session.user.id}
-        initialMessages={messagesWithThreadInfo}
-        recipient={recipient}
-      />
-    </div>
+    <ChatInterface 
+      chatId={channelId || userId || ''} 
+      chatType={channelId ? 'channel' : 'dm'}
+      currentUserId={user.id}
+      initialMessages={[]}
+    />
   );
 } 

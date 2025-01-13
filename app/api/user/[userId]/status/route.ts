@@ -1,22 +1,30 @@
 import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { rateLimit } from "@/lib/rate-limit";
 
 export async function GET(
   request: Request,
   { params }: { params: { userId: string } }
 ) {
   try {
-    const { userId } = await Promise.resolve(params);
+    const { userId } = params;
     
+    // Use the rate limiter
+    if (!rateLimit.check(`status_${userId}`, 5, 10000)) {
+      return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 });
+    }
+
     const status = await prisma.userStatus.findUnique({
       where: {
-        userId,
-      },
+        userId
+      }
     });
 
     return NextResponse.json(status);
   } catch (error) {
     console.error("[USER_STATUS_GET]", error);
-    return new NextResponse("Internal Error", { status: 500 });
+    return NextResponse.json({ error: "Internal Error" }, { status: 500 });
   }
 } 

@@ -27,11 +27,24 @@ export default function UserList({
   const { statuses, fetchStatus } = useUserStatus();
 
   useEffect(() => {
-    initialUsers.forEach(user => {
-      if (!statuses[user.id]) {
-        fetchStatus(user.id);
+    let isSubscribed = true;
+    const usersToFetch = initialUsers.filter(user => !statuses[user.id]);
+
+    const fetchStatuses = async () => {
+      for (const user of usersToFetch) {
+        if (isSubscribed && !statuses[user.id]) {
+          await fetchStatus(user.id);
+        }
       }
-    });
+    };
+
+    if (usersToFetch.length > 0) {
+      fetchStatuses();
+    }
+
+    return () => {
+      isSubscribed = false;
+    };
   }, [initialUsers, fetchStatus, statuses]);
 
   return (

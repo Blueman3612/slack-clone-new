@@ -119,7 +119,7 @@ export default function ChatSidebar() {
               src="/Acksle Logo.png"
               alt="Acksle Logo"
               fill
-              className="object-contain"
+              className="object-contain [image-rendering:pixelated]"
               priority
             />
           </div>

@@ -280,21 +280,30 @@ export default function ChatInterface({
   // Fetch chat name when component mounts or chatId changes
   useEffect(() => {
     const fetchChatName = async () => {
+      if (!chatId) return;
+
       try {
         if (chatType === 'channel') {
           const response = await fetch(`/api/channels/${chatId}`);
-          if (!response.ok) throw new Error('Failed to fetch channel');
+          if (!response.ok) {
+            console.error('Failed to fetch channel:', await response.text());
+            throw new Error('Failed to fetch channel');
+          }
           const channel = await response.json();
           setChatName(`#${channel.name}`);
         } else {
           const response = await fetch(`/api/users/${chatId}`);
-          if (!response.ok) throw new Error('Failed to fetch user');
+          if (!response.ok) {
+            console.error('Failed to fetch user:', await response.text());
+            throw new Error('Failed to fetch user');
+          }
           const user = await response.json();
-          setChatName(user.name);
+          setChatName(user.name || 'Unknown User');
         }
       } catch (error) {
         console.error('Error fetching chat name:', error);
-        setChatName('');
+        setChatName(chatType === 'channel' ? '#unknown-channel' : 'Unknown User');
+        setError(`Failed to fetch ${chatType === 'channel' ? 'channel' : 'user'} information`);
       }
     };
 
@@ -306,27 +315,41 @@ export default function ChatInterface({
     if (!message.trim() || !chatId) return;
 
     try {
+      const payload = {
+        content: message,
+        ...(chatType === 'channel' 
+          ? { channelId: chatId }
+          : { receiverId: chatId }
+        ),
+      };
+
+      console.log('Sending message payload:', payload);
+
       const response = await fetch('/api/messages', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          content: message,
-          ...(chatType === 'channel' 
-            ? { channelId: chatId }
-            : { receiverId: chatId }
-          ),
-        }),
+        body: JSON.stringify(payload),
       });
 
+      let data;
+      try {
+        data = await response.json();
+      } catch (parseError) {
+        console.error('Failed to parse response:', parseError);
+        throw new Error('Invalid server response');
+      }
+
       if (!response.ok) {
-        throw new Error('Failed to send message');
+        console.error('Server error:', data);
+        throw new Error(data?.error || 'Failed to send message');
       }
 
       setMessage('');
     } catch (error) {
       console.error('Error sending message:', error);
+      setError(error instanceof Error ? error.message : 'Failed to send message');
     }
   };
 
@@ -472,18 +495,18 @@ export default function ChatInterface({
   };
 
   return (
-    <div className="flex h-full">
-      <div className="flex-1 flex flex-col h-full relative">
-        <div className="sticky top-0 left-0 right-0 bg-white dark:bg-gray-900 border-b dark:border-gray-700">
+    <div className="flex h-full w-full overflow-hidden">
+      <div className="flex flex-col h-full flex-1 min-w-0 bg-gray-50 dark:bg-gray-800">
+        <div className="sticky top-0 z-10 bg-white dark:bg-gray-900 border-b dark:border-gray-700">
           <div className="p-4">
-            <div className="relative flex items-center">
+            <div className="flex items-center justify-between">
               <div className="flex-1">
                 <SearchBar onSearch={handleSearch} />
               </div>
               <button
                 onClick={() => signOut()}
                 className="ml-4 p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 
-                         hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors flex-shrink-0"
+                         hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
                 title="Sign out"
               >
                 <LogOut className="w-5 h-5" />
@@ -491,7 +514,11 @@ export default function ChatInterface({
             </div>
           </div>
         </div>
-        <div ref={chatContainerRef} className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-600">
+
+        <div 
+          ref={chatContainerRef}
+          className="flex-1 overflow-y-auto"
+        >
           {error && (
             <div className="p-4 text-red-500 text-center">{error}</div>
           )}
@@ -520,7 +547,6 @@ export default function ChatInterface({
                             key={message.id}
                             message={message}
                             isOwn={message.userId === currentUserId}
-                            onlineUsers={onlineUsers}
                             onThreadClick={() => setSelectedThread(message)}
                             chatType={chatType}
                             chatId={chatId}
@@ -545,7 +571,6 @@ export default function ChatInterface({
                       <MessageBubble
                         message={message}
                         isOwn={message.userId === currentUserId}
-                        onlineUsers={onlineUsers}
                         onThreadClick={() => setSelectedThread(message)}
                         chatType={chatType}
                         chatId={chatId}
@@ -559,10 +584,10 @@ export default function ChatInterface({
           )}
         </div>
 
-        <div className="sticky bottom-0 left-0 right-0 bg-white dark:bg-gray-900 border-t dark:border-gray-700">
+        <div className="sticky bottom-0 bg-white dark:bg-gray-900 border-t dark:border-gray-700">
           <TypingIndicator typingUsers={typingUsers} />
           <form onSubmit={handleSubmit} className="p-4">
-            <div className="relative flex items-center">
+            <div className="relative">
               <input
                 type="text"
                 value={message}
@@ -571,7 +596,7 @@ export default function ChatInterface({
                   handleTyping();
                 }}
                 placeholder={`Message ${chatName || 'the channel'}`}
-                className="w-full p-3 pr-12 rounded-lg border dark:border-gray-600 
+                className="w-full px-4 py-2 rounded-lg border dark:border-gray-700 
                          bg-white dark:bg-gray-800 
                          text-gray-900 dark:text-white
                          placeholder-gray-500 dark:placeholder-gray-400
@@ -603,9 +628,8 @@ export default function ChatInterface({
       </div>
 
       {selectedThread && (
-        <div className="flex-shrink-0 overflow-hidden border-l border-gray-200 dark:border-gray-700">
+        <div className="w-[40rem] border-l border-gray-200 dark:border-gray-700 flex-shrink-0">
           <ThreadView
-            key={selectedThread.id}
             parentMessage={selectedThread}
             onClose={() => setSelectedThread(null)}
             chatType={chatType}

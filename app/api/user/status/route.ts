@@ -26,13 +26,13 @@ export async function GET(req: Request) {
 
 export async function POST(request: Request) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session?.user) {
-      return new NextResponse('Unauthorized', { status: 401 })
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const body = await request.json()
-    const { emoji, text } = body
+    const body = await request.json();
+    const { emoji, text } = body;
 
     const status = await prisma.userStatus.upsert({
       where: {
@@ -41,52 +41,52 @@ export async function POST(request: Request) {
       update: {
         emoji,
         text,
+        updatedAt: new Date()
       },
       create: {
         userId: session.user.id,
         emoji,
-        text,
-      },
-    })
+        text
+      }
+    });
 
-    // Trigger status update event
+    // Trigger real-time update
     await pusherServer.trigger('user-status', 'status-update', {
       userId: session.user.id,
       status: {
         emoji,
-        text,
+        text
       }
-    })
+    });
 
-    return NextResponse.json(status)
+    return NextResponse.json(status);
   } catch (error) {
-    console.error("[USER_STATUS_POST]", error)
-    return new NextResponse('Internal Error', { status: 500 })
+    console.error("[USER_STATUS_POST]", { error });
+    return NextResponse.json({ error: "Failed to update status" }, { status: 500 });
   }
 }
 
 export async function DELETE(request: Request) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session?.user) {
-      return new NextResponse('Unauthorized', { status: 401 })
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     await prisma.userStatus.delete({
       where: {
         userId: session.user.id
       }
-    })
+    });
 
-    // Trigger status clear event
-    await pusherServer.trigger('user-status', 'status-update', {
-      userId: session.user.id,
-      status: null
-    })
+    // Trigger real-time deletion
+    await pusherServer.trigger('user-status', 'status-deleted', {
+      userId: session.user.id
+    });
 
-    return new NextResponse(null, { status: 204 })
+    return new NextResponse(null, { status: 204 });
   } catch (error) {
-    console.error("[USER_STATUS_DELETE]", error)
-    return new NextResponse('Internal Error', { status: 500 })
+    console.error("[USER_STATUS_DELETE]", error);
+    return NextResponse.json({ error: "Failed to delete status" }, { status: 500 });
   }
 } 

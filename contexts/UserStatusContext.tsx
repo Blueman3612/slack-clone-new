@@ -37,17 +37,30 @@ export function UserStatusProvider({ children }: { children: React.ReactNode }) 
     }
   };
 
+  // Subscribe to real-time status updates
   useEffect(() => {
     const channel = pusherClient.subscribe('user-status');
 
+    // Handle status updates
     channel.bind('status-update', (data: { 
       userId: string;
       status: UserStatus | null;
     }) => {
+      console.log('Received status update:', data);
       setStatuses(prev => ({
         ...prev,
         [data.userId]: data.status
       }));
+    });
+
+    // Handle status deletions
+    channel.bind('status-deleted', (data: { userId: string }) => {
+      console.log('Received status deletion:', data);
+      setStatuses(prev => {
+        const newStatuses = { ...prev };
+        delete newStatuses[data.userId];
+        return newStatuses;
+      });
     });
 
     return () => {

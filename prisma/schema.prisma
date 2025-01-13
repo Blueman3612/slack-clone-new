@@ -25,6 +25,27 @@ model User {
   channels        Channel[] @relation("ChannelMembers")
   receivedMessages Message[] @relation("ReceivedMessages")
   reactions       Reaction[]
+  
+  // New server relations
+  ownedServers    Server[]  @relation("ServerOwner")
+  memberOfServers Server[]  @relation("ServerMembers")
+}
+
+// New Server model
+model Server {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  password    String    // Hashed password for joining
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // Relations
+  owner       User      @relation("ServerOwner", fields: [ownerId], references: [id])
+  ownerId     String
+  members     User[]    @relation("ServerMembers")
+  channels    Channel[]
+
+  @@index([ownerId])
 }
 
 model Account {
@@ -109,6 +130,12 @@ model Channel {
   members   User[]    @relation("ChannelMembers")
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
+  
+  // New server relation
+  server    Server    @relation(fields: [serverId], references: [id])
+  serverId  String
+
+  @@index([serverId])
 }
 
 model Reaction {

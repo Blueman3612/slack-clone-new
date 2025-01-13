@@ -12,11 +12,11 @@ import { highlightText } from '@/utils/highlightText'
 import StatusTooltip from './StatusTooltip'
 import { useUserStatus } from '@/contexts/UserStatusContext'
 import { useRole } from '@/hooks/useRole'
+import { useOnlineUsers } from '@/contexts/OnlineUsersContext'
 
 interface MessageBubbleProps {
   message: Message;
   isOwn: boolean;
-  onlineUsers?: Set<string>;
   onThreadClick?: () => void;
   showThread?: boolean;
   chatType: 'channel' | 'dm';
@@ -35,7 +35,6 @@ const debug = (message: string) => {
 export default function MessageBubble({ 
   message: initialMessage,
   isOwn, 
-  onlineUsers,
   onThreadClick,
   showThread = true,
   chatType,
@@ -53,6 +52,7 @@ export default function MessageBubble({
   const [showUserStatus, setShowUserStatus] = useState(false)
   const avatarRef = useRef<HTMLDivElement>(null)
   const { statuses, fetchStatus } = useUserStatus()
+  const { onlineUsers } = useOnlineUsers()
 
   const effectiveChatId = chatType === 'channel' 
     ? message.channelId 

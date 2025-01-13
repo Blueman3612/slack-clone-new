@@ -39,26 +39,34 @@ export default function UserStatus() {
 
   // Fetch initial status
   useEffect(() => {
+    let isSubscribed = true;
+
     const fetchStatus = async () => {
-      if (session?.user?.id) {
-        try {
-          const response = await fetch(`/api/user/status`);
-          if (response.ok) {
-            const status = await response.json();
-            if (status) {
-              setCurrentStatus({
-                emoji: status.emoji,
-                text: status.text
-              });
-            }
-          }
-        } catch (error) {
-          console.error('Error fetching status:', error);
+      if (!session?.user?.id) return;
+
+      try {
+        const response = await fetch(`/api/user/${session.user.id}/status`);
+        if (response.ok && isSubscribed) {
+          const status = await response.json();
+          setCurrentStatus(status ? {
+            emoji: status.emoji,
+            text: status.text
+          } : null);
         }
+      } catch (error) {
+        console.error('Error fetching status:', error);
       }
     };
 
     fetchStatus();
+
+    // Set up polling with a reasonable interval (e.g., 30 seconds)
+    const interval = setInterval(fetchStatus, 30000);
+
+    return () => {
+      isSubscribed = false;
+      clearInterval(interval);
+    };
   }, [session?.user?.id]);
 
   useEffect(() => {

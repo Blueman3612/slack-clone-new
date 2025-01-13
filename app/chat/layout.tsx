@@ -2,6 +2,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import ChatSidebar from "@/components/ChatSidebar";
+import { ServerPanel } from "@/components/ServerPanel";
 
 export default async function ChatLayout({
   children,
@@ -15,9 +16,12 @@ export default async function ChatLayout({
   }
 
   return (
-    <main className="flex h-screen">
-      <ChatSidebar />
-      {children}
+    <main className="flex h-screen w-full">
+      <ServerPanel />
+      <div className="flex flex-1 min-w-0">
+        <ChatSidebar />
+        {children}
+      </div>
     </main>
   );
 } 
