@@ -5,17 +5,18 @@ const prisma = new PrismaClient();
 
 async function main() {
   try {
-    // Find or create admin user
-    const adminUser = await prisma.user.findFirst({
+    console.log('Starting database seeding...');
+
+    // Create admin user if it doesn't exist
+    let adminUser = await prisma.user.findFirst({
       where: {
-        role: 'ADMIN'
+        email: 'admin@example.com'
       }
     });
 
-    let owner;
     if (!adminUser) {
       console.log('Creating admin user...');
-      owner = await prisma.user.create({
+      adminUser = await prisma.user.create({
         data: {
           name: 'Admin',
           email: 'admin@example.com',
@@ -23,13 +24,10 @@ async function main() {
           hashedPassword: await bcrypt.hash('adminpassword', 12),
         }
       });
-    } else {
-      owner = adminUser;
+      console.log('Admin user created successfully');
     }
 
-    console.log('Creating default server...');
-    
-    // Check if default server exists
+    // Create General Server if it doesn't exist
     const existingServer = await prisma.server.findFirst({
       where: {
         name: 'General Server'
@@ -37,58 +35,77 @@ async function main() {
     });
 
     if (!existingServer) {
-      // Create default server with a general channel
-      const defaultServer = await prisma.server.create({
+      console.log('Creating General Server...');
+      const generalServer = await prisma.server.create({
         data: {
           name: 'General Server',
-          password: await bcrypt.hash('default', 12),
+          displayName: 'General Server',
+          password: await bcrypt.hash('general-server', 12),
           owner: {
-            connect: { id: owner.id }
+            connect: { id: adminUser.id }
           },
           members: {
-            connect: [{ id: owner.id }]
+            connect: [{ id: adminUser.id }]
           },
           channels: {
             create: [
-              { name: 'general' }
+              { name: 'general' },
+              { name: 'random' }
             ]
           }
+        },
+        include: {
+          channels: true,
+          members: true
         }
       });
 
-      // Add all existing users to the server
-      const users = await prisma.user.findMany({
-        where: {
-          NOT: { id: owner.id }
+      console.log('General Server created with channels:', 
+        generalServer.channels.map(c => c.name).join(', '));
+    }
+
+    // Create a test user if needed
+    let testUser = await prisma.user.findFirst({
+      where: {
+        email: 'test@example.com'
+      }
+    });
+
+    if (!testUser) {
+      console.log('Creating test user...');
+      testUser = await prisma.user.create({
+        data: {
+          name: 'Test User',
+          email: 'test@example.com',
+          role: 'USER',
+          hashedPassword: await bcrypt.hash('testpassword', 12),
         }
       });
+      console.log('Test user created successfully');
 
-      if (users.length > 0) {
+      // Add test user to General Server
+      if (existingServer) {
         await prisma.server.update({
-          where: { id: defaultServer.id },
+          where: { id: existingServer.id },
           data: {
             members: {
-              connect: users.map(user => ({ id: user.id }))
+              connect: { id: testUser.id }
             }
           }
         });
       }
-
-      console.log('Default server created:', defaultServer.name);
-    } else {
-      console.log('Default server already exists');
     }
 
-    console.log('Migration completed successfully!');
+    console.log('Database seeding completed successfully!');
   } catch (error) {
-    console.error('Migration failed:', error);
+    console.error('Error during database seeding:', error);
     throw error;
   }
 }
 
 main()
   .catch((e) => {
-    console.error(e);
+    console.error('Error in seed script:', e);
     process.exit(1);
   })
   .finally(async () => {

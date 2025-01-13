@@ -4,6 +4,60 @@ import { prisma } from "@/lib/prisma";
 import { authOptions } from "@/lib/auth";
 import bcrypt from "bcrypt";
 
+async function ensureGeneralServer() {
+  const generalServer = await prisma.server.findFirst({
+    where: { name: 'General Server' }
+  });
+
+  if (!generalServer) {
+    // Create the general server with a default admin user
+    const adminUser = await prisma.user.findFirst({
+      where: { role: 'ADMIN' }
+    });
+
+    if (!adminUser) {
+      console.error('No admin user found to create General Server');
+      return null;
+    }
+
+    return await prisma.server.create({
+      data: {
+        name: 'General Server',
+        displayName: 'General Server',
+        password: await bcrypt.hash('general-server', 12),
+        owner: {
+          connect: { id: adminUser.id }
+        },
+        members: {
+          connect: [{ id: adminUser.id }]
+        },
+        channels: {
+          create: [
+            { name: 'general' }
+          ]
+        }
+      },
+      include: {
+        channels: true,
+        owner: {
+          select: {
+            id: true,
+            name: true,
+          }
+        },
+        _count: {
+          select: {
+            members: true,
+            channels: true
+          }
+        }
+      }
+    });
+  }
+
+  return generalServer;
+}
+
 export async function POST(request: Request) {
   try {
     const session = await getServerSession(authOptions);
@@ -48,6 +102,7 @@ export async function POST(request: Request) {
     const server = await prisma.server.create({
       data: {
         name: trimmedName,
+        displayName: trimmedName,
         password: await bcrypt.hash(password, 12),
         owner: {
           connect: { id: userId }
@@ -92,6 +147,9 @@ export async function GET(request: Request) {
     if (!session?.user || !userId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    // Ensure General Server exists
+    await ensureGeneralServer();
 
     console.log('Fetching servers for user:', userId);
 
