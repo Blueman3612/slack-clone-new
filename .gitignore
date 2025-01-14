@@ -101,3 +101,6 @@ storybook-static/
 /data/*
 # But keep the folder structure by including an empty .gitkeep file
 !/data/.gitkeep
+
+# Scripts
+/scripts/*

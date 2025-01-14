@@ -8,7 +8,7 @@ export async function POST(request: Request) {
     const session = await getServerSession(authOptions);
     if (!session?.user) {
       console.error('No session found');
-      return new NextResponse("Unauthorized", { status: 401 });
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const body = await request.json();
@@ -17,7 +17,7 @@ export async function POST(request: Request) {
     const { message } = body;
     if (!message) {
       console.error('No message provided');
-      return new NextResponse("Message is required", { status: 400 });
+      return NextResponse.json({ error: "Message is required" }, { status: 400 });
     }
 
     console.log('Creating Blueman chat...');
@@ -30,6 +30,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ response });
   } catch (error) {
     console.error("[BLUEMAN_CHAT]", error);
-    return new NextResponse("Internal Error", { status: 500 });
+    return NextResponse.json(
+      { error: "An error occurred while processing your request" }, 
+      { status: 500 }
+    );
   }
 } 

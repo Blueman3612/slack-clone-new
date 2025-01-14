@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react'
 import { useSession, signOut } from 'next-auth/react'
 import { pusherClient } from '@/lib/pusher'
-import { Message } from '@/types'
+import { Message, Reaction } from '@/types'
 import MessageBubble from './MessageBubble'
 import { useOnlineUsers } from '@/contexts/OnlineUsersContext'
 import TypingIndicator from './TypingIndicator'
@@ -61,6 +61,18 @@ export default function ChatInterface({
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [isMessageSending, setIsMessageSending] = useState(false);
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
+
+  // Add this helper function at the top of the component
+  const getMessageDate = (message: Message): Date => {
+    return message.createdAt instanceof Date ? message.createdAt : new Date(message.createdAt);
+  };
+
+  // Update the comparison functions
+  const isMessageAfterTimestamp = (message: Message, timestamp: string) => {
+    const messageDate = new Date(message.createdAt).getTime();
+    const compareDate = new Date(timestamp).getTime();
+    return messageDate > compareDate;
+  };
 
   // Add this function to parse timestamps safely
   const parseTimestamp = (timestamp: string | null): number => {
@@ -240,14 +252,28 @@ export default function ChatInterface({
   // Modify the sendMessage function
   const sendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!message.trim() || isMessageSending) return;
+    if (!message.trim() || isMessageSending || !session?.user) return;
 
+    const now = new Date();
     const tempId = `temp-${Date.now()}`;
-    const tempMessage = {
+    const tempMessage: Message = {
       id: tempId,
       content: message.trim(),
-      createdAt: new Date().toISOString(),
+      createdAt: now,
+      updatedAt: now,
       userId: currentUserId,
+      replyCount: 0,
+      reactions: [],
+      threadId: undefined,
+      user: {
+        id: currentUserId,
+        name: session?.user?.name || 'Unknown',
+        email: session?.user?.email || `user-${currentUserId}@example.com`,
+        image: session?.user?.image || '',
+        role: session?.user?.role
+      },
+      channelId: chatType === 'channel' ? chatId : undefined,
+      receiverId: chatType === 'dm' ? chatId : undefined
     };
 
     // Optimistically add the message
@@ -284,10 +310,28 @@ export default function ChatInterface({
       if (isBluemanChat()) {
         setIsBluemanTyping(true);
         try {
+          // Get the last 10 messages for context, excluding the temp message
+          const chatHistory = messages
+            .filter(msg => msg.id !== tempId)
+            .slice(-10)
+            .map(msg => ({
+              role: msg.userId === chatId ? 'assistant' : 'user',
+              content: msg.content
+            }));
+
+          // Add the current message to chat history
+          chatHistory.push({
+            role: 'user',
+            content: message.trim()
+          });
+
           const aiResponse = await fetch('/api/ai/blueman', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message: message.trim() }),
+            body: JSON.stringify({ 
+              message: message.trim(),
+              chatHistory
+            }),
           });
 
           const aiData = await aiResponse.json();
@@ -314,7 +358,8 @@ export default function ChatInterface({
         }
       }
     } catch (error) {
-      console.error('Error in message flow:', error);
+      console.error('Error sending message:', error);
+      setMessages(prev => prev.filter(m => m.id !== tempId));
     } finally {
       setIsMessageSending(false);
     }
@@ -471,8 +516,9 @@ export default function ChatInterface({
         shouldScrollToBottom && 
         messages.length > initialMessages.length && 
         !currentSearchQuery) {
-      const isNewMessage = messages[messages.length - 1]?.createdAt > 
-        new Date(Date.now() - 1000).toISOString();
+      const isNewMessage = messages[messages.length - 1] && 
+        new Date(messages[messages.length - 1].createdAt).getTime() > 
+        new Date(Date.now() - 1000).getTime();
       
       if (isNewMessage) {
         scrollToBottom();
@@ -484,8 +530,9 @@ export default function ChatInterface({
   useEffect(() => {
     // Only set shouldScrollToBottom for truly new messages, not when loading from search
     if (!pendingMessageId && !currentSearchQuery && messages.length > initialMessages.length) {
-      const isNewMessage = messages[messages.length - 1]?.createdAt > 
-        new Date(Date.now() - 1000).toISOString(); // Message created in last second
+      const isNewMessage = messages[messages.length - 1] && 
+        new Date(messages[messages.length - 1].createdAt).getTime() > 
+        new Date(Date.now() - 1000).getTime(); // Message created in last second
       
       if (isNewMessage) {
         setShouldScrollToBottom(true);
@@ -537,7 +584,7 @@ export default function ChatInterface({
     }
   }, [chatId]);
 
-  // Add this effect for real-time message updates
+  // Update the Pusher event handler
   useEffect(() => {
     if (!chatId) return;
 
@@ -553,16 +600,61 @@ export default function ChatInterface({
     channel.bind('new-message', (newMessage: Message) => {
       console.log('Received new message:', newMessage);
       setMessages(prev => {
-        // Don't add messages from ourselves (handled by optimistic update)
-        if (newMessage.userId === currentUserId) {
-          return prev;
+        // Check if this is our own message that was just sent
+        const tempMessage = prev.find(m => 
+          m.id.startsWith('temp-') && 
+          m.content === newMessage.content &&
+          m.userId === newMessage.userId
+        );
+
+        if (tempMessage) {
+          // Replace our temporary message with the real one, preserving user role and reactions
+          return prev.map(m => {
+            if (m.id === tempMessage.id) {
+              return {
+                ...newMessage,
+                user: {
+                  ...newMessage.user,
+                  role: tempMessage.user.role
+                },
+                reactions: newMessage.reactions || [] // Ensure reactions are initialized
+              };
+            }
+            return m;
+          });
         }
-        // Avoid duplicate messages
+
+        // For messages from other users, use the message as is
         if (prev.some(m => m.id === newMessage.id)) {
           return prev;
         }
-        return [...prev, newMessage];
+
+        return [...prev, { ...newMessage, reactions: newMessage.reactions || [] }];
       });
+    });
+
+    // Handle reaction updates
+    channel.bind('message-reaction', ({ messageId, reaction, type }: { messageId: string, reaction: Reaction, type: 'add' | 'remove' }) => {
+      setMessages(prev => prev.map(message => {
+        if (message.id === messageId) {
+          if (type === 'add') {
+            // Avoid duplicate reactions
+            if (message.reactions.some(r => r.id === reaction.id)) {
+              return message;
+            }
+            return {
+              ...message,
+              reactions: [...message.reactions, reaction]
+            };
+          } else {
+            return {
+              ...message,
+              reactions: message.reactions.filter(r => r.id !== reaction.id)
+            };
+          }
+        }
+        return message;
+      }));
     });
 
     // Handle typing events
@@ -596,6 +688,20 @@ export default function ChatInterface({
       pusherClient.unsubscribe(channelName);
     };
   }, [chatId, chatType, currentUserId]);
+
+  // Update the useEffect for unread messages
+  useEffect(() => {
+    if (!lastReadTimestamp || messages.length === 0) return;
+
+    const unreadMessages = messages.filter(msg => 
+      msg.userId !== currentUserId && 
+      isMessageAfterTimestamp(msg, lastReadTimestamp)
+    );
+
+    if (unreadMessages.length > 0) {
+      // Handle unread messages...
+    }
+  }, [messages, lastReadTimestamp, currentUserId]);
 
   return (
     <div className="flex h-full w-full overflow-hidden">

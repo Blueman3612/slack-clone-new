@@ -12,6 +12,14 @@ export interface Reaction {
   };
 }
 
+export interface User {
+  id: string;
+  name: string;
+  email: string;
+  image: string;
+  role?: string;
+}
+
 export interface Message {
   id: string;
   content: string;
@@ -22,11 +30,6 @@ export interface Message {
   receiverId?: string;
   threadId?: string;
   replyCount: number;
-  user: {
-    id: string;
-    name: string;
-    email: string;
-    image: string;
-  };
   reactions: Reaction[];
+  user: User;
 } 
