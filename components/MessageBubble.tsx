@@ -24,6 +24,7 @@ interface MessageBubbleProps {
   searchQuery?: string;
   onMessageClick?: () => void;
   isSearchResult?: boolean;
+  isHighlighted?: boolean;
 }
 
 const debug = (message: string) => {
@@ -41,7 +42,8 @@ export default function MessageBubble({
   chatId,
   searchQuery = '',
   onMessageClick,
-  isSearchResult = false
+  isSearchResult = false,
+  isHighlighted = false
 }: MessageBubbleProps) {
   const { data: session } = useSession()
   const { isAdmin } = useRole()
@@ -354,8 +356,11 @@ export default function MessageBubble({
     <div 
       className={`flex items-start space-x-3 group px-4 py-2 
         ${isSearchResult ? 'cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800' : 'hover:bg-black/[0.03] dark:hover:bg-white/[0.02]'} 
-        transition-colors duration-100`}
+        transition-colors duration-100 ${
+          isHighlighted ? 'animate-highlight bg-yellow-100 dark:bg-yellow-900' : ''
+        }`}
       onClick={isSearchResult ? onMessageClick : undefined}
+      id={`message-${message.id}`}
     >
       <div 
         ref={avatarRef}

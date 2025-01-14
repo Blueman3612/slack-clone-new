@@ -5,7 +5,7 @@ import { User } from "@prisma/client";
 import { cn } from "@/lib/utils";
 import StatusTooltip from './StatusTooltip';
 import { useUserStatus } from '@/contexts/UserStatusContext';
-import { Shield } from 'lucide-react';
+import { Shield, Bot } from 'lucide-react';
 
 interface UserListProps {
   currentUserId: string;
@@ -15,6 +15,9 @@ interface UserListProps {
   onlineUsers?: Set<string>;
   notifications?: { [key: string]: { count: number; hasUnread: boolean; hasMention: boolean } };
 }
+
+const ADMIN_USER_ID = 'cm5ug4h3p0000uj6s1itvm3p7';
+const TEST_USER_ID = 'cm5ug4hpp0004uj6spjcdf6sw';
 
 export default function UserList({ 
   currentUserId, 
@@ -53,16 +56,25 @@ export default function UserList({
     console.log('UserList notifications:', notifications);
   }, [notifications]);
 
+  const filteredUsers = initialUsers.filter(user => {
+    return user.isAI || (
+      user.id !== ADMIN_USER_ID && 
+      user.id !== TEST_USER_ID
+    );
+  });
+
   return (
     <div className="space-y-2">
       <h2 className="text-lg font-semibold mb-4">Direct Messages</h2>
-      {initialUsers.map((user) => {
+      {filteredUsers.map((user) => {
         const notificationKey = `dm-${user.id}`;
         const notification = notifications[notificationKey];
         
-        console.log(`User ${user.name} (${user.id}) notification:`, {
-          key: notificationKey,
-          notification
+        console.log('User details:', {
+          name: user.name,
+          id: user.id,
+          isAI: user.isAI,
+          role: user.role
         });
 
         return (
@@ -77,31 +89,29 @@ export default function UserList({
             )}
           >
             <div className="flex items-center gap-3">
-              <div className={cn(
-                "w-3 h-3 rounded-full",
-                onlineUsers.has(user.id) ? "bg-green-500" : "bg-gray-500"
-              )} />
+              <div className="w-3 h-3 flex items-center justify-center">
+                {user.isAI === true ? (
+                  <Bot className="w-3 h-3 text-blue-500" />
+                ) : (
+                  <div className={cn(
+                    "w-3 h-3 rounded-full",
+                    onlineUsers.has(user.id) ? "bg-green-500" : "bg-gray-500"
+                  )} />
+                )}
+              </div>
               <div 
                 ref={el => userRefs.current[user.id] = el}
                 className="relative flex items-center gap-2"
                 onMouseEnter={() => setHoveredUserId(user.id)}
                 onMouseLeave={() => setHoveredUserId(null)}
               >
-                {user.image ? (
+                <div className="relative">
                   <img
-                    src={user.image}
+                    src={user.image || '/default-avatar.png'}
                     alt={user.name || "User"}
-                    className={cn(
-                      "w-6 h-6 rounded-full transition-transform duration-200",
-                      selectedUserId === user.id && "scale-110"
-                    )}
+                    className="w-6 h-6 rounded-full"
                   />
-                ) : (
-                  <div className={cn(
-                    "w-6 h-6 rounded-full bg-gray-300 dark:bg-gray-700 transition-transform duration-200",
-                    selectedUserId === user.id && "scale-110"
-                  )} />
-                )}
+                </div>
                 <div className="flex items-center gap-1 min-w-0">
                   <span className={cn(
                     "text-sm truncate transition-colors duration-200",

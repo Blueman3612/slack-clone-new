@@ -24,3 +24,6 @@ Do not create, or try to edit any files outside of this folder.
 NEVER try to create/edit files outside of the C:\Users\natha\Documents\GauntletAI\slack-clone-new directory for this project.
 
 Always use a step-by-step, focused approach when implementing changes. It is PARAMOUNT that you do not remove pre-existing functionality from files when you edit them. It is PARAMOUNT that you do not try to edit files outside of the correct directory and/or files that do not exist. Make sure you know the full contents of a file you are editing beforehand. If you do not have them, ask for them and commit the file to memory.
+
+IF YOU TRY TO EDIT/CREATE FILES OUTSIDE OF slack-clone-new I WILL FUCKING MURDER YOU
+

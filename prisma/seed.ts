@@ -27,10 +27,21 @@ async function main() {
 
     console.log('Creating default server...');
     
-    // Create default server
-    const defaultServer = await prisma.server.create({
-      data: {
+    // Use upsert instead of create for the default server
+    const defaultServer = await prisma.server.upsert({
+      where: { name: 'General Server' },
+      update: {
+        displayName: 'General Server',
+        password: await bcrypt.hash('default', 12),
+        owner: {
+          connect: { 
+            id: adminUser?.id || (await prisma.user.findFirst({ where: { role: 'ADMIN' } }))!.id 
+          }
+        }
+      },
+      create: {
         name: 'General Server',
+        displayName: 'General Server',
         password: await bcrypt.hash('default', 12),
         owner: {
           connect: { 
@@ -45,7 +56,7 @@ async function main() {
     // Get all channels without a server
     const channels = await prisma.channel.findMany({
       where: {
-        serverId: null
+        serverId: undefined
       }
     });
 
@@ -75,8 +86,48 @@ async function main() {
     });
 
     console.log('Migration completed successfully!');
+
+    // Create or update Blueman AI user
+    console.log('Creating Blueman AI user...');
+    const blueman = await prisma.user.upsert({
+      where: { email: 'blueman@ai.local' },
+      update: {
+        name: 'Blueman AI',
+        isAI: true,
+        aiModel: 'blueman',
+        image: '/ai-avatars/blueman.png',
+        role: 'USER'
+      },
+      create: {
+        name: 'Blueman AI',
+        email: 'blueman@ai.local',
+        role: 'USER',
+        isAI: true,
+        aiModel: 'blueman',
+        image: '/ai-avatars/blueman.png',
+        hashedPassword: await bcrypt.hash('blueman-ai', 12)
+      }
+    });
+
+    // Add Blueman AI to the General Server
+    const server = await prisma.server.findFirst({
+      where: { name: 'General Server' }
+    });
+
+    if (server) {
+      await prisma.server.update({
+        where: { id: server.id },
+        data: {
+          members: {
+            connect: { id: blueman.id }
+          }
+        }
+      });
+    }
+
+    console.log('Blueman AI user created/updated:', blueman.id);
   } catch (error) {
-    console.error('Migration failed:', error);
+    console.error('Error:', error);
     throw error;
   }
 }

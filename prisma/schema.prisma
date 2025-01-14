@@ -18,6 +18,8 @@ model User {
   updatedAt       DateTime  @updatedAt
   status          UserStatus?
   role            String    @default("USER")
+  isAI            Boolean   @default(false)
+  aiModel         String?   // e.g., "blueman", "other-bot", etc.
 
   accounts        Account[]
   sessions        Session[]

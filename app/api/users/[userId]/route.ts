@@ -13,7 +13,10 @@ export async function GET(
       return new NextResponse("Unauthorized", { status: 401 });
     }
 
-    const userId = params.userId;
+    const userId = params?.userId;
+    if (!userId) {
+      return new NextResponse("User ID is required", { status: 400 });
+    }
 
     const user = await prisma.user.findUnique({
       where: { id: userId },
@@ -22,7 +25,8 @@ export async function GET(
         name: true,
         email: true,
         image: true,
-        role: true
+        role: true,
+        isAI: true
       }
     });
 

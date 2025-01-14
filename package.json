@@ -63,9 +63,10 @@
     "@types/bcrypt": "^5.0.2",
     "@types/lodash": "^4.17.14",
     "prisma": "^6.1.0",
-    "tailwindcss-animate": "^1.0.7"
+    "tailwindcss-animate": "^1.0.7",
+    "ts-node": "^10.9.2"
   },
   "prisma": {
-    "seed": "node prisma/seed.js"
+    "seed": "ts-node --compiler-options {\"module\":\"CommonJS\"} prisma/seed.ts"
   }
 }

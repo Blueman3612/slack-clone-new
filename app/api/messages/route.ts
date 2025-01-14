@@ -91,24 +91,27 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { content, channelId, receiverId } = body;
+    const { content, channelId, receiverId, userId } = body;
 
-    console.log('Message creation attempt:', { content, channelId, receiverId });
+    console.log('Message creation attempt:', { content, channelId, receiverId, userId });
 
     if (!content?.trim()) {
       return NextResponse.json({ error: "Message content is required" }, { status: 400 });
     }
 
-    // Verify user exists
+    // Use provided userId (for Blueman responses) or session user id
+    const messageUserId = userId || session.user.id;
+
+    // Verify user exists (either sender or Blueman)
     const user = await prisma.user.findUnique({
-      where: { id: session.user.id }
+      where: { id: messageUserId }
     });
 
     if (!user) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
-    // Verify channel exists if channelId is provided
+    // Keep all existing verification logic
     if (channelId) {
       const channel = await prisma.channel.findUnique({
         where: { id: channelId }
@@ -119,7 +122,6 @@ export async function POST(request: Request) {
       }
     }
 
-    // Verify receiver exists if receiverId is provided
     if (receiverId) {
       const receiver = await prisma.user.findUnique({
         where: { id: receiverId }
@@ -133,7 +135,7 @@ export async function POST(request: Request) {
     // Create message with proper data structure
     const messageData = {
       content: content.trim(),
-      userId: session.user.id,
+      userId: messageUserId, // Use the determined userId
       isThreadStarter: false,
       replyCount: 0,
       ...(channelId ? { channelId } : {}),
@@ -164,16 +166,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json(message);
   } catch (error) {
-    console.error("[MESSAGES_POST]", {
-      error: error instanceof Error ? {
-        message: error.message,
-        stack: error.stack,
-        data: error['data'] // Capture Prisma error data if available
-      } : error
-    });
-
-    return NextResponse.json({ 
-      error: error instanceof Error ? error.message : "Failed to send message" 
-    }, { status: 500 });
+    console.error("[MESSAGES_POST]", error);
+    return NextResponse.json({ error: "Internal Error" }, { status: 500 });
   }
 } 

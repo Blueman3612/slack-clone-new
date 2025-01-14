@@ -14,6 +14,8 @@ import FilePreview from './FilePreview';
 import SearchBar from './SearchBar';
 import { useRouter } from 'next/navigation';
 import { LogOut } from 'lucide-react';
+import { createBluemanChat } from '@/lib/ai-chat';
+import { highlightText } from '@/utils/highlightText';
 
 interface Props {
   chatId: string;
@@ -40,7 +42,7 @@ export default function ChatInterface({
   const currentChannelRef = useRef<string | null>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout>();
   const [selectedThread, setSelectedThread] = useState<Message | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingInitial, setIsLoadingInitial] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [chatName, setChatName] = useState<string>('');
   const [isUploading, setIsUploading] = useState(false);
@@ -54,6 +56,11 @@ export default function ChatInterface({
   const [lastReadTimestamp, setLastReadTimestamp] = useState<string | null>(
     initialLastReadTimestamp || null
   );
+  const [isAIChat, setIsAIChat] = useState(false);
+  const [isBluemanTyping, setIsBluemanTyping] = useState(false);
+  const [isLoadingMessages, setIsLoadingMessages] = useState(false);
+  const [isMessageSending, setIsMessageSending] = useState(false);
+  const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
 
   // Add this function to parse timestamps safely
   const parseTimestamp = (timestamp: string | null): number => {
@@ -122,164 +129,43 @@ export default function ChatInterface({
 
   // Position at bottom after messages load and render
   useLayoutEffect(() => {
-    if (!isLoading && messages.length > 0) {
-      // Give the browser a chance to paint
+    if (!isLoadingInitial && messages.length > 0 && !pendingMessageId && !currentSearchQuery) {
       const timer = setTimeout(positionAtBottom, 100);
       return () => clearTimeout(timer);
     }
-  }, [isLoading, messages.length, positionAtBottom]);
+  }, [isLoadingInitial, messages.length, positionAtBottom, pendingMessageId, currentSearchQuery]);
 
   // Fetch messages when chat changes
   useEffect(() => {
     const fetchMessages = async () => {
-      setIsLoading(true);
-      setError(null);
+      if (!chatId) return;
+      
+      // Only show loading on initial load when no messages exist
+      if (messages.length === 0) {
+        setIsLoadingInitial(true);
+      }
+      
       try {
-        const response = await fetch(`/api/messages?${
-          chatType === 'channel' ? 'channelId' : 'receiverId'
-        }=${chatId}`);
+        const response = await fetch(
+          chatType === 'channel'
+            ? `/api/messages?channelId=${chatId}`
+            : `/api/messages?receiverId=${chatId}`
+        );
         
-        if (!response.ok) {
-          throw new Error('Failed to fetch messages');
-        }
+        if (!response.ok) throw new Error('Failed to fetch messages');
+        
         const data = await response.json();
-        const messagesWithCounts = data.map((msg: Message) => ({
-          ...msg,
-          replyCount: msg.replyCount || 0
-        }));
-
-        if (currentChannelRef.current === chatId) {
-          setMessages(messagesWithCounts);
-        }
+        setMessages(data);
       } catch (error) {
         console.error('Error fetching messages:', error);
         setError('Failed to load messages');
       } finally {
-        setIsLoading(false);
+        setIsLoadingInitial(false);
       }
     };
 
     fetchMessages();
-
-    const channelName = chatType === 'channel'
-      ? `channel-${chatId}`
-      : `dm-${[currentUserId, chatId].sort().join('-')}`;
-
-    const channel = pusherClient.subscribe(channelName);
-
-    // Handle typing events
-    channel.bind('typing', (data: { userId: string; name: string }) => {
-      if (data.userId !== currentUserId) {
-        setTypingUsers((users) => {
-          if (!users.includes(data.name)) {
-            return [...users, data.name];
-          }
-          return users;
-        });
-      }
-    });
-
-    channel.bind('stop-typing', (data: { userId: string; name: string }) => {
-      if (data.userId !== currentUserId) {
-        setTypingUsers((users) => 
-          users.filter(name => name !== data.name)
-        );
-      }
-    });
-
-    // Handle new messages
-    channel.bind('new-message', (newMessage: Message) => {
-      if (currentChannelRef.current === chatId) {
-        setMessages((currentMessages) => {
-          if (currentMessages.some(m => m.id === newMessage.id)) {
-            return currentMessages;
-          }
-          return [...currentMessages, newMessage];
-        });
-        smoothScrollToBottom();
-      }
-    });
-
-    // Message deletion handler without auto-scroll
-    channel.bind('message-deleted', ({ messageId, threadDeleted }: { messageId: string, threadDeleted: boolean }) => {
-      if (currentChannelRef.current === chatId) {
-        setMessages((currentMessages) => 
-          currentMessages.filter(message => {
-            // Remove the deleted message and all its replies if it's a thread
-            if (threadDeleted) {
-              return message.id !== messageId && message.parentId !== messageId;
-            }
-            // Just remove the single message
-            return message.id !== messageId;
-          })
-        );
-
-        // Close thread view if the deleted message was being viewed
-        if (selectedThread?.id === messageId) {
-          setSelectedThread(null);
-        }
-      }
-    });
-
-    // Handle thread updates
-    channel.bind('update-thread', (data: {
-      messageId: string;
-      replyCount: number;
-      lastReply: any;
-    }) => {
-      if (currentChannelRef.current === chatId) {
-        setMessages((currentMessages) =>
-          currentMessages.map((msg) => {
-            if (msg.id === data.messageId) {
-              return {
-                ...msg,
-                replyCount: data.replyCount,
-                lastReply: data.lastReply
-              };
-            }
-            return msg;
-          })
-        );
-      }
-    });
-
-    // Handle reactions
-    channel.bind('message-reaction', (data: {
-      messageId: string;
-      reaction: any;
-      type: 'add' | 'remove';
-    }) => {
-      if (currentChannelRef.current === chatId) {
-        setMessages((currentMessages) =>
-          currentMessages.map((msg) => {
-            if (msg.id === data.messageId) {
-              const reactions = msg.reactions || [];
-              if (data.type === 'add') {
-                return {
-                  ...msg,
-                  reactions: [...reactions, data.reaction],
-                };
-              } else {
-                return {
-                  ...msg,
-                  reactions: reactions.filter(r => r.id !== data.reaction.id),
-                };
-              }
-            }
-            return msg;
-          })
-        );
-      }
-    });
-
-    return () => {
-      pusherClient.unsubscribe(channelName);
-      channel.unbind_all();
-      if (typingTimeoutRef.current) {
-        clearTimeout(typingTimeoutRef.current);
-      }
-    };
-  }, [chatId, chatType, currentUserId]);
+  }, [chatId, chatType]);
 
   // Reset messages when changing chats
   useEffect(() => {
@@ -328,46 +214,109 @@ export default function ChatInterface({
     fetchChatName();
   }, [chatId, chatType]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  // Add effect to check if this is an AI chat
+  useEffect(() => {
+    const checkIfAIChat = async () => {
+      if (chatType === 'dm') {
+        try {
+          const response = await fetch(`/api/users/${chatId}`);
+          const user = await response.json();
+          setIsAIChat(user.isAI === true);
+        } catch (error) {
+          console.error('Error checking AI status:', error);
+        }
+      }
+    };
+
+    checkIfAIChat();
+  }, [chatId, chatType]);
+
+  // Add this function near the top of the component
+  const isBluemanChat = useCallback(() => {
+    // Check if this is a DM with Blueman AI
+    return chatType === 'dm' && chatId === 'cm5vmlcru0001ujjcqeqz5743';
+  }, [chatType, chatId]);
+
+  // Modify the sendMessage function
+  const sendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!message.trim() || !chatId) return;
+    if (!message.trim() || isMessageSending) return;
 
+    const tempId = `temp-${Date.now()}`;
+    const tempMessage = {
+      id: tempId,
+      content: message.trim(),
+      createdAt: new Date().toISOString(),
+      userId: currentUserId,
+    };
+
+    // Optimistically add the message
+    setMessages(prev => [...prev, tempMessage]);
+    setMessage('');
+    
+    setIsMessageSending(true);
     try {
-      const payload = {
-        content: message,
-        ...(chatType === 'channel' 
-          ? { channelId: chatId }
-          : { receiverId: chatId }
-        ),
-      };
-
-      console.log('Sending message payload:', payload);
-
       const response = await fetch('/api/messages', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(
+          chatType === 'channel' 
+            ? {
+                content: message.trim(),
+                channelId: chatId
+              }
+            : {
+                content: message.trim(),
+                receiverId: chatId
+              }
+        ),
       });
 
-      let data;
-      try {
-        data = await response.json();
-      } catch (parseError) {
-        console.error('Failed to parse response:', parseError);
-        throw new Error('Invalid server response');
-      }
-
       if (!response.ok) {
-        console.error('Server error:', data);
-        throw new Error(data?.error || 'Failed to send message');
+        setMessages(prev => prev.filter(m => m.id !== tempId));
+        throw new Error('Failed to send message');
       }
 
-      setMessage('');
+      const data = await response.json();
+      // Replace temp message with real message
+      setMessages(prev => prev.map(m => m.id === tempId ? data : m));
+
+      if (isBluemanChat()) {
+        setIsBluemanTyping(true);
+        try {
+          const aiResponse = await fetch('/api/ai/blueman', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: message.trim() }),
+          });
+
+          const aiData = await aiResponse.json();
+          if (aiData.response) {
+            const bluemanResponse = await fetch('/api/messages', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                content: aiData.response,
+                receiverId: currentUserId,
+                userId: chatId,
+              }),
+            });
+
+            if (bluemanResponse.ok) {
+              const bluemanMessageData = await bluemanResponse.json();
+              setMessages(prev => [...prev, bluemanMessageData]);
+            }
+          }
+        } catch (error) {
+          console.error('Error in AI chat flow:', error);
+        } finally {
+          setIsBluemanTyping(false);
+        }
+      }
     } catch (error) {
-      console.error('Error sending message:', error);
-      setError(error instanceof Error ? error.message : 'Failed to send message');
+      console.error('Error in message flow:', error);
+    } finally {
+      setIsMessageSending(false);
     }
   };
 
@@ -462,43 +411,74 @@ export default function ChatInterface({
   }, [chatId, chatType]);
 
   const handleSearchMessageClick = async (message: Message) => {
-    // Set the pending message ID before navigation
     setPendingMessageId(message.id);
     setShouldScrollToBottom(false);
-
-    // Clear search results
+    setHighlightedMessageId(message.id);
+    
     setSearchResults([]);
     setCurrentSearchQuery('');
 
-    // For DMs, determine the correct user ID
+    // Remove highlight after animation
+    setTimeout(() => setHighlightedMessageId(null), 2000);
+
     if (!message.channelId && message.receiverId) {
       const dmPartnerId = message.userId === currentUserId ? message.receiverId : message.userId;
-      router.push(`/chat?userId=${dmPartnerId}`);
+      await router.push(`/chat?userId=${dmPartnerId}`);
     } else if (message.channelId) {
-      // For channels
-      router.push(`/chat?channelId=${message.channelId}`);
+      await router.push(`/chat?channelId=${message.channelId}`);
     }
   };
 
-  // Modify scroll behavior to respect priorities
+  // Modify the scroll and highlight effect
   useEffect(() => {
     if (pendingMessageId) {
-      const messageElement = document.getElementById(`message-${pendingMessageId}`);
-      if (messageElement) {
-        setTimeout(() => {
+      // Give time for the new route to load and render
+      const timer = setTimeout(() => {
+        const messageElement = document.getElementById(`message-${pendingMessageId}`);
+        if (messageElement) {
+          // First scroll to the message
           messageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          messageElement.classList.add('bg-yellow-100', 'dark:bg-yellow-900');
+          
+          // Then add highlight with transition
+          messageElement.classList.add(
+            'bg-yellow-100',
+            'dark:bg-yellow-900',
+            'transition-all',
+            'duration-1000'
+          );
+
+          // Remove highlight after delay but keep scroll position
           setTimeout(() => {
-            messageElement.classList.remove('bg-yellow-100', 'dark:bg-yellow-900');
-            setPendingMessageId(null);
-          }, 2000);
-        }, 100);
-      }
-    } else if (shouldScrollToBottom && messages.length > initialMessages.length && !currentSearchQuery) {
-      // Only scroll to bottom for new messages
-      scrollToBottom();
+            messageElement.classList.remove(
+              'bg-yellow-100',
+              'dark:bg-yellow-900',
+              'transition-all',
+              'duration-1000'
+            );
+            // Don't reset pendingMessageId to prevent auto-scroll
+          }, 3000); // Increased duration to 3 seconds
+        }
+      }, 500); // Increased delay to ensure content is loaded
+
+      return () => clearTimeout(timer);
     }
-  }, [messages, pendingMessageId, currentSearchQuery, shouldScrollToBottom, chatId]);
+  }, [pendingMessageId]);
+
+  // Modify the new messages scroll effect to be more strict
+  useEffect(() => {
+    // Only scroll for new messages if we're not viewing a search result
+    if (!pendingMessageId && 
+        shouldScrollToBottom && 
+        messages.length > initialMessages.length && 
+        !currentSearchQuery) {
+      const isNewMessage = messages[messages.length - 1]?.createdAt > 
+        new Date(Date.now() - 1000).toISOString();
+      
+      if (isNewMessage) {
+        scrollToBottom();
+      }
+    }
+  }, [messages, shouldScrollToBottom, pendingMessageId, initialMessages.length, scrollToBottom, currentSearchQuery]);
 
   // Modify the effect that handles new messages
   useEffect(() => {
@@ -557,6 +537,66 @@ export default function ChatInterface({
     }
   }, [chatId]);
 
+  // Add this effect for real-time message updates
+  useEffect(() => {
+    if (!chatId) return;
+
+    const channelName = chatType === 'channel'
+      ? `channel-${chatId}`
+      : `dm-${[currentUserId, chatId].sort().join('-')}`;
+
+    console.log('Subscribing to Pusher channel:', channelName);
+    
+    const channel = pusherClient.subscribe(channelName);
+
+    // Handle new messages
+    channel.bind('new-message', (newMessage: Message) => {
+      console.log('Received new message:', newMessage);
+      setMessages(prev => {
+        // Don't add messages from ourselves (handled by optimistic update)
+        if (newMessage.userId === currentUserId) {
+          return prev;
+        }
+        // Avoid duplicate messages
+        if (prev.some(m => m.id === newMessage.id)) {
+          return prev;
+        }
+        return [...prev, newMessage];
+      });
+    });
+
+    // Handle typing events
+    channel.bind('typing', (data: { userId: string; name: string }) => {
+      console.log('Typing event received:', data);
+      if (data.userId !== currentUserId) {
+        setTypingUsers(users => {
+          if (!users.includes(data.name)) {
+            return [...users, data.name];
+          }
+          return users;
+        });
+      }
+    });
+
+    channel.bind('stop-typing', (data: { userId: string; name: string }) => {
+      console.log('Stop typing event received:', data);
+      if (data.userId !== currentUserId) {
+        setTypingUsers(users => users.filter(name => name !== data.name));
+      }
+    });
+
+    // Handle message deletions
+    channel.bind('message-deleted', ({ messageId }: { messageId: string }) => {
+      setMessages(prev => prev.filter(m => m.id !== messageId));
+    });
+
+    return () => {
+      console.log('Unsubscribing from Pusher channel:', channelName);
+      channel.unbind_all();
+      pusherClient.unsubscribe(channelName);
+    };
+  }, [chatId, chatType, currentUserId]);
+
   return (
     <div className="flex h-full w-full overflow-hidden">
       <div className="flex flex-col h-full flex-1 min-w-0 bg-gray-50 dark:bg-gray-800">
@@ -578,56 +618,66 @@ export default function ChatInterface({
           </div>
         </div>
 
-        <div 
-          ref={chatContainerRef}
-          className="flex-1 overflow-y-auto"
-        >
-          {error && (
-            <div className="p-4 text-red-500 text-center">{error}</div>
-          )}
-          {isLoading ? (
-            <div className="p-4 text-center">Loading messages...</div>
-          ) : (
-            <div className="py-4">
-              {isSearching ? (
-                <div className="flex items-center justify-center h-16 text-gray-500">
-                  Searching...
-                </div>
-              ) : currentSearchQuery && searchResults.length > 0 ? (
-                <div className="flex flex-col space-y-4 p-4">
-                  {searchResults.map((group) => (
-                    <div key={group.key} className="border-b dark:border-gray-700 pb-4">
-                      <div className="text-sm font-semibold mb-2 text-gray-600 dark:text-gray-400">
-                        {group.type === 'channel' ? '# ' : '🔒 '}
-                        {group.name}
-                        <span className="ml-2 text-xs text-gray-500">
-                          {group.messageCount} {group.messageCount === 1 ? 'result' : 'results'}
-                        </span>
-                      </div>
-                      <div className="space-y-2">
-                        {group.messages.map((message: Message) => (
-                          <MessageBubble
-                            key={message.id}
-                            message={message}
-                            isOwn={message.userId === currentUserId}
-                            onThreadClick={() => setSelectedThread(message)}
-                            chatType={chatType}
-                            chatId={chatId}
-                            searchQuery={currentSearchQuery}
-                            isSearchResult={true}
-                            onMessageClick={() => handleSearchMessageClick(message)}
-                          />
-                        ))}
-                      </div>
+        {currentSearchQuery ? (
+          <div className="flex-1 overflow-y-auto">
+            {Object.keys(searchResults).length > 0 ? (
+              Object.entries(searchResults).map(([groupKey, group]: [string, any]) => (
+                <div key={groupKey} className="border-b dark:border-gray-700">
+                  <div className="p-4">
+                    <h3 className="text-sm font-semibold text-gray-500 dark:text-gray-400 mb-2">
+                      {group.type === 'channel' ? `#${group.name}` : group.name}
+                    </h3>
+                    <div className="space-y-2">
+                      {group.messages.map((message: Message) => (
+                        <button
+                          key={message.id}
+                          onClick={() => handleSearchMessageClick(message)}
+                          className="w-full text-left p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md"
+                        >
+                          <div className="flex items-center gap-2 mb-1">
+                            <img
+                              src={message.user?.image || '/default-avatar.png'}
+                              alt={message.user?.name || 'User'}
+                              className="w-5 h-5 rounded-full"
+                            />
+                            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                              {message.user?.name || 'Unknown User'}
+                            </span>
+                            <span className="text-xs text-gray-500 dark:text-gray-400">
+                              {new Date(message.createdAt).toLocaleString()}
+                            </span>
+                          </div>
+                          <div className="text-sm text-gray-900 dark:text-gray-100">
+                            {highlightText(message.content, currentSearchQuery)}
+                          </div>
+                        </button>
+                      ))}
                     </div>
-                  ))}
+                  </div>
                 </div>
-              ) : currentSearchQuery ? (
-                <div className="flex items-center justify-center p-4 text-gray-500">
+              ))
+            ) : (
+              <div className="flex items-center justify-center h-full">
+                <div className="text-gray-500 dark:text-gray-400">
                   No results found for "{currentSearchQuery}"
                 </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <>
+            <div ref={chatContainerRef} className="flex-1 overflow-y-auto">
+              {isLoadingInitial ? (
+                <div className="flex items-center justify-center h-full">
+                  <div className="text-gray-500 dark:text-gray-400">
+                    Loading messages...
+                  </div>
+                </div>
+              ) : error ? (
+                <div className="flex items-center justify-center h-full">
+                  <div className="text-red-500">{error}</div>
+                </div>
               ) : (
-                // Regular message display
                 <div>
                   {messages?.map((message, index) => {
                     const messageTime = new Date(message.createdAt).getTime();
@@ -674,58 +724,66 @@ export default function ChatInterface({
                           onThreadClick={() => setSelectedThread(message)}
                           chatType={chatType}
                           chatId={chatId}
+                          isHighlighted={message.id === highlightedMessageId}
                         />
                       </div>
                     );
                   })}
+                  <div ref={messagesEndRef} />
                 </div>
               )}
-              <div ref={messagesEndRef} />
             </div>
-          )}
-        </div>
 
-        <div className="sticky bottom-0 bg-white dark:bg-gray-900 border-t dark:border-gray-700">
-          <TypingIndicator typingUsers={typingUsers} />
-          <form onSubmit={handleSubmit} className="p-4">
-            <div className="relative">
-              <input
-                type="text"
-                value={message}
-                onChange={(e) => {
-                  setMessage(e.target.value);
-                  handleTyping();
-                }}
-                placeholder={`Message ${chatName || 'the channel'}`}
-                className="w-full px-4 py-2 rounded-lg border dark:border-gray-700 
-                         bg-white dark:bg-gray-800 
-                         text-gray-900 dark:text-white
-                         placeholder-gray-500 dark:placeholder-gray-400
-                         focus:outline-none focus:ring-2 focus:ring-blue-500"
-                disabled={isUploading}
-              />
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="absolute right-3 p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded"
-                disabled={isUploading}
-              >
-                <FiPaperclip className="h-5 w-5 text-gray-500 dark:text-gray-400" />
-              </button>
-              <input
-                type="file"
-                ref={fileInputRef}
-                className="hidden"
-                onChange={handleFileUpload}
-              />
+            <div className="sticky bottom-0 bg-white dark:bg-gray-900 border-t dark:border-gray-700">
+              {(typingUsers.length > 0 || isBluemanTyping) && (
+                <div className="px-4 py-2">
+                  <TypingIndicator 
+                    typingUsers={isBluemanTyping ? ['Blueman AI'] : typingUsers} 
+                  />
+                </div>
+              )}
+              
+              <form onSubmit={sendMessage} className="p-4">
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={message}
+                    onChange={(e) => {
+                      setMessage(e.target.value);
+                      handleTyping();
+                    }}
+                    placeholder={`Message ${chatName || 'the channel'}`}
+                    className="w-full px-4 py-2 rounded-lg border dark:border-gray-700 
+                             bg-white dark:bg-gray-800 
+                             text-gray-900 dark:text-white
+                             placeholder-gray-500 dark:placeholder-gray-400
+                             focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    disabled={isUploading}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="absolute right-3 p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded"
+                    disabled={isUploading}
+                  >
+                    <FiPaperclip className="h-5 w-5 text-gray-500 dark:text-gray-400" />
+                  </button>
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    className="hidden"
+                    onChange={handleFileUpload}
+                  />
+                </div>
+                {isUploading && (
+                  <div className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                    Uploading file...
+                  </div>
+                )}
+              </form>
             </div>
-            {isUploading && (
-              <div className="mt-2 text-sm text-gray-500 dark:text-gray-400">
-                Uploading file...
-              </div>
-            )}
-          </form>
-        </div>
+          </>
+        )}
       </div>
 
       {selectedThread && (

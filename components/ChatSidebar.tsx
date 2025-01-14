@@ -13,7 +13,6 @@ import { useRole } from '@/hooks/useRole';
 import { cn } from '@/lib/utils';
 import PusherClient from 'pusher-js';
 import { Session } from 'next-auth';
-import { BluemanChatButton } from './BluemanChatButton';
 
 interface Notification {
   count: number;
@@ -50,6 +49,7 @@ export default function ChatSidebar() {
   const [newChannelName, setNewChannelName] = useState('');
   const { onlineUsers } = useOnlineUsers();
   const [notifications, setNotifications] = useState<NotificationState>({});
+  const [bluemanUser, setBluemanUser] = useState<User | null>(null);
 
   console.log('Admin status:', {
     isAdmin,
@@ -74,10 +74,19 @@ export default function ChatSidebar() {
         }
 
         const data = await response.json();
-        const filteredUsers = data.filter((user: User) => 
-          user.id !== session.user.id
-        );
-        setUsers(filteredUsers);
+        const blueman = data.find((user: User) => user.email === 'blueman@ai.local');
+        if (blueman) {
+          setBluemanUser(blueman);
+          const filteredUsers = data.filter((user: User) => 
+            user.id !== session.user.id && user.email !== 'blueman@ai.local'
+          );
+          setUsers(filteredUsers);
+        } else {
+          const filteredUsers = data.filter((user: User) => 
+            user.id !== session.user.id
+          );
+          setUsers(filteredUsers);
+        }
       } catch (error) {
         console.error('Error fetching users:', error);
       }
@@ -336,17 +345,13 @@ export default function ChatSidebar() {
         </div>
 
         <UserList
-          initialUsers={users}
+          initialUsers={bluemanUser ? [bluemanUser, ...users] : users}
           currentUserId={session?.user?.id || ''}
           onUserClick={(userId) => router.push(`/chat?userId=${userId}`)}
           selectedUserId={currentUserId}
           onlineUsers={onlineUsers}
           notifications={notifications}
         />
-      </div>
-
-      <div className="mt-4 px-3">
-        <BluemanChatButton />
       </div>
 
       <UserStatus />

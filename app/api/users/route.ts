@@ -22,6 +22,7 @@ export async function GET(request: Request) {
         email: true,
         image: true,
         role: true,
+        isAI: true,
       },
     });
 
