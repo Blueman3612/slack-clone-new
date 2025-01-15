@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useRef, useCallback, useMemo } fr
 import { pusherClient, isClient } from '@/lib/pusher';
 import { Message, Reaction } from '@/types';
 import { Channel, PresenceChannel } from 'pusher-js';
+import { useSession } from 'next-auth/react';
 
 const debug = (...args: any[]) => {
   if (process.env.NODE_ENV === 'development') {
@@ -45,6 +46,7 @@ export interface PusherContextType {
 export const PusherContext = createContext<PusherContextType | null>(null);
 
 export function PusherProvider({ children }: { children: React.ReactNode }) {
+  const { data: session } = useSession();
   const subscriptionsRef = useRef<Map<string, Channel>>(new Map());
 
   const unsubscribeFromChannel = useCallback((channelName: string) => {
@@ -133,6 +135,11 @@ export function PusherProvider({ children }: { children: React.ReactNode }) {
     }
   ) => {
     if (!isClient || !pusherClient) return;
+    if (!session?.user) {
+      debug(`Skipping presence channel subscription to ${channelName}: No authenticated user`);
+      return;
+    }
+    
     debug(`Subscribing to presence channel: ${channelName}`);
 
     try {
@@ -166,12 +173,12 @@ export function PusherProvider({ children }: { children: React.ReactNode }) {
       }
 
       channel.bind('pusher:subscription_error', (error: any) => {
-        console.error(`Error subscribing to presence channel ${channelName}:`, error);
+        debug(`Error subscribing to presence channel ${channelName}:`, error);
       });
     } catch (error) {
       console.error(`Error in subscribeToPresenceChannel for ${channelName}:`, error);
     }
-  }, [unsubscribeFromChannel]);
+  }, [unsubscribeFromChannel, session]);
 
   // Clean up all subscriptions when the provider unmounts
   useEffect(() => {
