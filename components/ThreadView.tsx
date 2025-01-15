@@ -2,11 +2,11 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { useSession } from 'next-auth/react'
-import { pusherClient } from '@/lib/pusher'
 import { Message } from '@/types'
 import MessageBubble from './MessageBubble'
 import { X } from 'lucide-react'
 import { useOnlineUsers } from '@/contexts/OnlineUsersContext'
+import { usePusher } from '@/contexts/PusherContext'
 import TypingIndicator from './TypingIndicator'
 import axios from 'axios'
 
@@ -34,12 +34,13 @@ export default function ThreadView({
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const { onlineUsers } = useOnlineUsers()
   const typingTimeoutRef = useRef<NodeJS.Timeout>()
+  const { subscribeToChannel, unsubscribeFromChannel } = usePusher()
 
   // Handle typing events
   const handleTyping = async () => {
     if (!session?.user) return;
 
-    const channelName = `thread-${parentMessage.id}`;
+    const channelName = `presence-thread-${parentMessage.id}`;
 
     // Clear existing timeout
     if (typingTimeoutRef.current) {
@@ -50,7 +51,7 @@ export default function ThreadView({
       // Send typing event
       await axios.post('/api/pusher/trigger-event', {
         channel: channelName,
-        event: 'thread-typing',
+        event: 'client-typing',
         data: {
           userId: currentUserId,
           name: session.user.name || 'Anonymous'
@@ -61,7 +62,7 @@ export default function ThreadView({
       typingTimeoutRef.current = setTimeout(async () => {
         await axios.post('/api/pusher/trigger-event', {
           channel: channelName,
-          event: 'thread-stop-typing',
+          event: 'client-stop-typing',
           data: {
             userId: currentUserId,
             name: session.user.name || 'Anonymous'
@@ -75,54 +76,97 @@ export default function ThreadView({
 
   // Subscribe to thread updates and typing events
   useEffect(() => {
-    const channelName = `thread-${parentMessage.id}`;
-    const channel = pusherClient.subscribe(channelName);
+    const channelName = `presence-thread-${parentMessage.id}`;
 
-    // Handle typing events
-    channel.bind('thread-typing', (data: { userId: string; name: string }) => {
-      if (data.userId !== currentUserId) {
-        setTypingUsers((users) => {
-          if (!users.includes(data.name)) {
-            return [...users, data.name];
-          }
-          return users;
-        });
-      }
-    });
-
-    channel.bind('thread-stop-typing', (data: { userId: string; name: string }) => {
-      if (data.userId !== currentUserId) {
-        setTypingUsers((users) => 
-          users.filter(name => name !== data.name)
-        );
-      }
-    });
-
-    channel.bind('new-reply', (reply: Message) => {
-      setMessages(current => {
-        if (current.some(msg => msg.id === reply.id)) {
-          return current;
+    const handlers = {
+      onNewMessage: (reply: Message & { type?: 'message-delete', messageId?: string }) => {
+        if (reply.type === 'message-delete') {
+          setMessages(current => current.filter(msg => msg.id !== reply.messageId));
+          setParentMessage(prev => ({
+            ...prev,
+            replyCount: Math.max(0, (prev.replyCount || 0) - 1)
+          }));
+          return;
         }
-        return [...current, reply];
-      });
-      scrollToBottom();
-    });
 
-    channel.bind('thread-count-update', (data: { replyCount: number }) => {
-      setParentMessage(prev => ({
-        ...prev,
-        replyCount: data.replyCount
-      }));
-    });
+        setMessages(current => {
+          if (current.some(msg => msg.id === reply.id)) {
+            return current;
+          }
+          return [...current, reply];
+        });
+        scrollToBottom();
+      },
+      onTyping: (data: { userId: string; name: string }) => {
+        if (data.userId !== currentUserId) {
+          setTypingUsers((users) => {
+            if (!users.includes(data.name)) {
+              return [...users, data.name];
+            }
+            return users;
+          });
+        }
+      },
+      onStopTyping: (data: { userId: string; name: string }) => {
+        if (data.userId !== currentUserId) {
+          setTypingUsers((users) => 
+            users.filter(name => name !== data.name)
+          );
+        }
+      },
+      onThreadUpdate: (data: { replyCount: number }) => {
+        setParentMessage(prev => ({
+          ...prev,
+          replyCount: data.replyCount
+        }));
+      },
+      onReaction: (data: { messageId: string; reaction: any; type: 'add' | 'remove' }) => {
+        const updateReactions = (message: Message) => {
+          if (message.id !== data.messageId) return message;
+          
+          const currentReactions = message.reactions || [];
+          if (data.type === 'add') {
+            // Only add if not already present
+            if (!currentReactions.some(r => r.id === data.reaction.id)) {
+              return {
+                ...message,
+                reactions: [...currentReactions, data.reaction]
+              };
+            }
+          } else {
+            // Remove reaction
+            return {
+              ...message,
+              reactions: currentReactions.filter(r => {
+                if (data.reaction.id) {
+                  return r.id !== data.reaction.id;
+                }
+                return !(r.emoji === data.reaction.emoji && r.userId === data.reaction.userId);
+              })
+            };
+          }
+          return message;
+        };
+
+        // Update parent message if it's the target
+        if (data.messageId === parentMessage.id) {
+          setParentMessage(prev => updateReactions(prev));
+        }
+
+        // Update thread messages if one is the target
+        setMessages(current => current.map(msg => updateReactions(msg)));
+      }
+    };
+
+    subscribeToChannel(channelName, handlers);
 
     return () => {
-      channel.unbind_all();
-      pusherClient.unsubscribe(channelName);
+      unsubscribeFromChannel(channelName);
       if (typingTimeoutRef.current) {
         clearTimeout(typingTimeoutRef.current);
       }
     };
-  }, [currentUserId, parentMessage.id]);
+  }, [currentUserId, parentMessage.id, subscribeToChannel, unsubscribeFromChannel]);
 
   // Fetch thread messages
   useEffect(() => {
@@ -181,58 +225,6 @@ export default function ThreadView({
     }
   };
 
-  // Add Pusher subscription for real-time updates
-  useEffect(() => {
-    const channel = pusherClient.subscribe(`thread-${parentMessage.id}`);
-
-    channel.bind('new-reply', (message: Message) => {
-      setMessages(prev => {
-        // Avoid duplicate messages
-        if (prev.some(m => m.id === message.id)) {
-          return prev;
-        }
-        return [...prev, message];
-      });
-      scrollToBottom();
-    });
-
-    return () => {
-      channel.unbind_all();
-      pusherClient.unsubscribe(`thread-${parentMessage.id}`);
-    };
-  }, [parentMessage.id]);
-
-  useEffect(() => {
-    const channelName = chatType === 'channel'
-      ? `channel-${chatId}`
-      : `dm-${[currentUserId, chatId].sort().join('-')}`;
-
-    const channel = pusherClient.subscribe(channelName);
-
-    // Handle new thread replies
-    channel.bind('new-message', (message: Message) => {
-      if (message.threadId === parentMessage.id) {
-        setMessages(current => {
-          if (current.some(m => m.id === message.id)) {
-            return current;
-          }
-          return [...current, message];
-        });
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-      }
-    });
-
-    // Handle message deletions in thread
-    channel.bind('message-deleted', ({ messageId }: { messageId: string }) => {
-      setMessages(current => current.filter(reply => reply.id !== messageId));
-    });
-
-    return () => {
-      pusherClient.unsubscribe(channelName);
-      channel.unbind_all();
-    };
-  }, [chatId, chatType, currentUserId, parentMessage.id]);
-
   // Add instant scroll to bottom when thread loads
   useEffect(() => {
     if (!isLoading && messages.length > 0) {
@@ -249,7 +241,7 @@ export default function ThreadView({
           onClick={onClose}
           className="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded"
         >
-          <X className="w-5 h-5" />
+          <X className="h-5 w-5" />
         </button>
       </div>
 
@@ -259,21 +251,19 @@ export default function ThreadView({
           message={parentMessage}
           isOwn={parentMessage.userId === currentUserId}
           showThread={false}
-          onlineUsers={onlineUsers}
           chatType={chatType}
           chatId={chatId}
         />
       </div>
 
-      {/* Thread replies */}
-      <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-4">
+      {/* Thread messages */}
+      <div className="flex-1 overflow-y-auto p-4" key="thread-messages">
         {messages.map((message) => (
           <MessageBubble
             key={message.id}
             message={message}
             isOwn={message.userId === currentUserId}
             showThread={false}
-            onlineUsers={onlineUsers}
             chatType={chatType}
             chatId={chatId}
           />
@@ -281,29 +271,30 @@ export default function ThreadView({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Typing indicator and reply input */}
-      <div className="border-t border-gray-200 dark:border-gray-700">
-        <TypingIndicator typingUsers={typingUsers} />
-        <div className="p-4">
-          <form onSubmit={handleSubmit}>
-            <input
-              type="text"
-              value={newMessage}
-              onChange={(e) => {
-                setNewMessage(e.target.value);
-                handleTyping();
-              }}
-              placeholder="Reply in thread..."
-              className="w-full p-2 rounded-lg border dark:border-gray-600 
-                       bg-white dark:bg-gray-900 
-                       text-gray-900 dark:text-white
-                       placeholder-gray-500 dark:placeholder-gray-400
-                       focus:outline-none focus:ring-2 focus:ring-blue-500"
-              disabled={isLoading}
-            />
-          </form>
+      {/* Typing indicator */}
+      {typingUsers.length > 0 && (
+        <div className="px-4 py-2">
+          <TypingIndicator typingUsers={typingUsers} />
         </div>
-      </div>
+      )}
+
+      {/* Message input */}
+      <form onSubmit={handleSubmit} className="p-4 border-t border-gray-200 dark:border-gray-700">
+        <input
+          type="text"
+          value={newMessage}
+          onChange={(e) => {
+            setNewMessage(e.target.value);
+            handleTyping();
+          }}
+          placeholder="Reply in thread..."
+          className="w-full px-4 py-2 rounded-lg border dark:border-gray-700 
+                   bg-white dark:bg-gray-800 
+                   text-gray-900 dark:text-white
+                   placeholder-gray-500 dark:placeholder-gray-400
+                   focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+      </form>
     </div>
-  )
+  );
 }

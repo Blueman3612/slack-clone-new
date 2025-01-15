@@ -151,7 +151,20 @@ export async function POST(request: Request) {
           select: {
             id: true,
             name: true,
-            image: true
+            email: true,
+            image: true,
+            role: true
+          }
+        },
+        reactions: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                image: true
+              }
+            }
           }
         }
       }
@@ -159,10 +172,17 @@ export async function POST(request: Request) {
 
     // Trigger Pusher event for real-time updates
     const channelName = channelId 
-      ? `channel-${channelId}`
-      : `dm-${[session.user.id, receiverId].sort().join('-')}`;
+      ? `presence-channel-${channelId}`
+      : `presence-dm-${[session.user.id, receiverId].sort().join('-')}`;
 
-    await pusherServer.trigger(channelName, 'new-message', message);
+    await pusherServer.trigger(channelName, 'new-message', {
+      ...message,
+      reactions: message.reactions || [],
+      user: {
+        ...message.user,
+        role: message.user.role || 'USER'
+      }
+    });
 
     return NextResponse.json(message);
   } catch (error) {

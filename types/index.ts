@@ -23,13 +23,16 @@ export interface User {
 export interface Message {
   id: string;
   content: string;
-  createdAt: Date;
-  updatedAt: Date;
   userId: string;
   channelId?: string;
   receiverId?: string;
   threadId?: string;
-  replyCount: number;
-  reactions: Reaction[];
+  createdAt: string;
+  updatedAt: string;
   user: User;
+  reactions?: Reaction[];
+  replyCount?: number;
+  fileUrl?: string;
+  fileName?: string;
+  fileType?: string;
 } 

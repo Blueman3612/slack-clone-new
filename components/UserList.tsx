@@ -36,9 +36,25 @@ export default function UserList({
     const usersToFetch = initialUsers.filter(user => !statuses[user.id]);
 
     const fetchStatuses = async () => {
-      for (const user of usersToFetch) {
-        if (isSubscribed && !statuses[user.id]) {
-          await fetchStatus(user.id);
+      // Fetch in batches with delay to prevent rate limiting
+      for (let i = 0; i < usersToFetch.length; i++) {
+        if (!isSubscribed) break;
+        
+        const user = usersToFetch[i];
+        if (!statuses[user.id]) {
+          try {
+            await fetchStatus(user.id);
+            // Add a 500ms delay between requests
+            if (i < usersToFetch.length - 1) {
+              await new Promise(resolve => setTimeout(resolve, 500));
+            }
+          } catch (error: any) {
+            // If we hit rate limit, wait longer before retrying
+            if (error?.response?.status === 429) {
+              await new Promise(resolve => setTimeout(resolve, 2000));
+              i--; // Retry this user
+            }
+          }
         }
       }
     };
@@ -51,10 +67,6 @@ export default function UserList({
       isSubscribed = false;
     };
   }, [initialUsers, fetchStatus, statuses]);
-
-  useEffect(() => {
-    console.log('UserList notifications:', notifications);
-  }, [notifications]);
 
   const filteredUsers = initialUsers.filter(user => {
     return user.isAI || (
@@ -70,13 +82,6 @@ export default function UserList({
         const notificationKey = `dm-${user.id}`;
         const notification = notifications[notificationKey];
         
-        console.log('User details:', {
-          name: user.name,
-          id: user.id,
-          isAI: user.isAI,
-          role: user.role
-        });
-
         return (
           <button
             key={user.id}

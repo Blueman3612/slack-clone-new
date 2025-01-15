@@ -122,9 +122,16 @@ export async function POST(request: Request) {
     await prisma.$executeRaw`UPDATE Message SET replyCount = ${threadCount} WHERE id = ${threadId}`;
 
     // Trigger real-time updates
-    await pusherServer.trigger(`thread-${threadId}`, 'new-reply', reply);
+    const threadChannel = `presence-thread-${threadId}`;
+    const mainChannel = parentMessage.channelId 
+      ? `presence-channel-${parentMessage.channelId}`
+      : `presence-dm-${[session.user.id, parentMessage.userId].sort().join('-')}`;
+
+    // Send new message to thread channel
+    await pusherServer.trigger(threadChannel, 'new-message', reply);
     
-    await pusherServer.trigger(`channel-${parentMessage.channelId}`, 'update-thread', {
+    // Send thread update to main channel (only update the thread count)
+    await pusherServer.trigger(mainChannel, 'thread-update', {
       messageId: threadId,
       replyCount: threadCount,
       lastReply: {
@@ -132,11 +139,6 @@ export async function POST(request: Request) {
         user: reply.user,
         createdAt: reply.createdAt
       }
-    });
-
-    // Add new thread count update event
-    await pusherServer.trigger(`thread-${threadId}`, 'thread-count-update', {
-      replyCount: threadCount
     });
 
     return NextResponse.json({ ...reply, replyCount: threadCount });

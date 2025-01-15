@@ -61,12 +61,39 @@ export async function DELETE(
           where: { threadId: message.threadId }
         });
 
-        // Trigger thread count update
-        await pusherServer.trigger(
-          `thread-${message.threadId}`,
-          'thread-reply-deleted',
-          { replyCount: remainingReplies }
-        );
+        // Get the parent message to determine the main channel
+        const parentMessage = await tx.message.findUnique({
+          where: { id: message.threadId }
+        });
+
+        if (parentMessage) {
+          // Get the main channel name
+          const mainChannelName = parentMessage.channelId 
+            ? `presence-channel-${parentMessage.channelId}`
+            : `presence-dm-${[parentMessage.userId, parentMessage.receiverId].sort().join('-')}`;
+
+          // Send thread update to both channels
+          const threadUpdate = {
+            messageId: message.threadId,
+            replyCount: remainingReplies,
+            lastReply: null
+          };
+
+          await Promise.all([
+            // Update thread channel
+            pusherServer.trigger(
+              `presence-thread-${message.threadId}`,
+              'thread-update',
+              threadUpdate
+            ),
+            // Update main channel
+            pusherServer.trigger(
+              mainChannelName,
+              'thread-update',
+              threadUpdate
+            )
+          ]);
+        }
       } else {
         // Delete all replies in the thread first
         await tx.message.deleteMany({
@@ -82,13 +109,28 @@ export async function DELETE(
 
     // Trigger Pusher event for real-time deletion
     const channelName = message.channelId 
-      ? `channel-${message.channelId}`
-      : `dm-${[message.userId, message.receiverId].sort().join('-')}`;
+      ? `presence-channel-${message.channelId}`
+      : `presence-dm-${[message.userId, message.receiverId].sort().join('-')}`;
 
-    await pusherServer.trigger(channelName, 'message-deleted', {
+    // Send deletion event to main channel
+    await pusherServer.trigger(channelName, 'new-message', {
+      type: 'message-delete',
       messageId: message.id,
-      threadDeleted: true
+      threadDeleted: !message.threadId
     });
+
+    // If this is a thread message, also send event to thread channel
+    if (message.threadId) {
+      await pusherServer.trigger(
+        `presence-thread-${message.threadId}`,
+        'new-message',
+        {
+          type: 'message-delete',
+          messageId: message.id,
+          threadId: message.threadId
+        }
+      );
+    }
 
     return new NextResponse(null, { status: 204 });
   } catch (error) {

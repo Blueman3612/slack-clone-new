@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useContext, useEffect, useState } from 'react';
-import { pusherClient } from '@/lib/pusher';
+import { usePusher } from './PusherContext';
 
 type OnlineUsersContextType = {
   onlineUsers: Set<string>;
@@ -11,35 +11,34 @@ const OnlineUsersContext = createContext<OnlineUsersContextType>({ onlineUsers: 
 
 export function OnlineUsersProvider({ children }: { children: React.ReactNode }) {
   const [onlineUsers, setOnlineUsers] = useState<Set<string>>(new Set());
+  const { subscribeToPresenceChannel, unsubscribeFromChannel } = usePusher();
 
   useEffect(() => {
     // Subscribe to global presence channel
-    const channel = pusherClient.subscribe('presence-global');
-
-    channel.bind('pusher:subscription_succeeded', (members: any) => {
-      const onlineUserIds = new Set<string>();
-      members.each((member: any) => {
-        onlineUserIds.add(member.id);
-      });
-      setOnlineUsers(onlineUserIds);
-    });
-
-    channel.bind('pusher:member_added', (member: any) => {
-      setOnlineUsers((prev) => new Set([...prev, member.id]));
-    });
-
-    channel.bind('pusher:member_removed', (member: any) => {
-      setOnlineUsers((prev) => {
-        const newSet = new Set(prev);
-        newSet.delete(member.id);
-        return newSet;
-      });
+    subscribeToPresenceChannel('presence-global', {
+      onSubscriptionSucceeded: (members: any) => {
+        const onlineUserIds = new Set<string>();
+        members.each((member: any) => {
+          onlineUserIds.add(member.id);
+        });
+        setOnlineUsers(onlineUserIds);
+      },
+      onMemberAdded: (member: any) => {
+        setOnlineUsers((prev) => new Set(Array.from(prev).concat(member.id)));
+      },
+      onMemberRemoved: (member: any) => {
+        setOnlineUsers((prev) => {
+          const newSet = new Set(prev);
+          newSet.delete(member.id);
+          return newSet;
+        });
+      }
     });
 
     return () => {
-      pusherClient.unsubscribe('presence-global');
+      unsubscribeFromChannel('presence-global');
     };
-  }, []);
+  }, [subscribeToPresenceChannel, unsubscribeFromChannel]);
 
   return (
     <OnlineUsersContext.Provider value={{ onlineUsers }}>

@@ -50,8 +50,9 @@ export async function POST(request: Request) {
       }
     });
 
-    // Trigger real-time update
-    await pusherServer.trigger('user-status', 'status-update', {
+    // Trigger real-time update with correct channel name
+    await pusherServer.trigger('presence-user-status', 'new-message', {
+      type: 'status-update',
       userId: session.user.id,
       status: {
         emoji,
@@ -79,8 +80,9 @@ export async function DELETE(request: Request) {
       }
     });
 
-    // Trigger real-time deletion
-    await pusherServer.trigger('user-status', 'status-deleted', {
+    // Trigger real-time deletion with correct channel name
+    await pusherServer.trigger('presence-user-status', 'new-message', {
+      type: 'status-delete',
       userId: session.user.id
     });
 

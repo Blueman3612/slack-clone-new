@@ -108,25 +108,49 @@ export async function POST(
       // Determine if the message is part of a thread
       const isThreadMessage = Boolean(message.threadId);
       
-      // Use the thread's parent message ID as chatId if it's a thread message
-      const effectiveChatId = isThreadMessage ? message.threadId : chatId;
-      const effectiveChatType = isThreadMessage ? 'thread' : chatType;
+      // Get the main channel name based on message type
+      const mainChannelName = message.channelId 
+        ? `presence-channel-${message.channelId}`
+        : `presence-dm-${[message.userId, message.receiverId].sort().join('-')}`;
       
-      const channelName = `presence-${effectiveChatType}-${effectiveChatId}`;
+      // Send the appropriate event based on whether we're adding or removing
+      const eventName = existingReaction ? 'reaction-removed' : 'reaction-added';
       
-      await pusherServer.trigger(channelName, 'message-reaction', {
+      const eventData = {
         messageId: messageId,
-        reaction: reaction || existingReaction,
-        type: existingReaction ? 'remove' : 'add'
-      });
+        reaction: {
+          ...(reaction || existingReaction),
+          id: existingReaction ? existingReaction.id : reaction?.id
+        }
+      };
 
-      // If it's a thread message, also trigger on the thread-specific channel
-      if (isThreadMessage) {
-        await pusherServer.trigger(`thread-${message.threadId}`, 'message-reaction', {
-          messageId: messageId,
-          reaction: reaction || existingReaction,
-          type: existingReaction ? 'remove' : 'add'
+      // Always send to main channel
+      await pusherServer.trigger(mainChannelName, eventName, eventData);
+
+      // If it's a thread message, also send to thread channel
+      if (isThreadMessage && message.threadId) {
+        await pusherServer.trigger(
+          `presence-thread-${message.threadId}`,
+          eventName,
+          eventData
+        );
+
+        // Also send to parent message's channel to update the thread preview
+        const parentMessage = await prisma.message.findUnique({
+          where: { id: message.threadId },
+          select: { channelId: true, userId: true, receiverId: true }
         });
+
+        if (parentMessage) {
+          const parentChannelName = parentMessage.channelId
+            ? `presence-channel-${parentMessage.channelId}`
+            : `presence-dm-${[parentMessage.userId, parentMessage.receiverId].sort().join('-')}`;
+
+          // Only send to parent channel if it's different from the current channel
+          if (parentChannelName !== mainChannelName) {
+            await pusherServer.trigger(parentChannelName, eventName, eventData);
+          }
+        }
       }
     }
 

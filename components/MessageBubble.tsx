@@ -7,7 +7,7 @@ import { useSession } from 'next-auth/react'
 import EmojiPicker from './EmojiPicker'
 import { MessageSquare, Shield, Trash2 } from 'lucide-react'
 import Image from 'next/image'
-import { pusherClient } from '@/lib/pusher'
+import { usePusher } from '@/contexts/PusherContext'
 import { highlightText } from '@/utils/highlightText'
 import StatusTooltip from './StatusTooltip'
 import { useUserStatus } from '@/contexts/UserStatusContext'
@@ -25,11 +25,20 @@ interface MessageBubbleProps {
   onMessageClick?: () => void;
   isSearchResult?: boolean;
   isHighlighted?: boolean;
+  onReactionAdd?: (messageId: string, emoji: string) => void;
+  onReactionRemove?: (messageId: string, reactionId: string) => void;
 }
 
-const debug = (message: string) => {
+const debug = (...args: any[]) => {
   if (process.env.NODE_ENV === 'development') {
-    console.debug(`[MessageBubble] ${message}`);
+    const message = args[0];
+    const isCritical = 
+      message.includes('Error:') || 
+      message.includes('failed');
+      
+    if (isCritical) {
+      console.debug('[MessageBubble]', ...args);
+    }
   }
 };
 
@@ -43,13 +52,13 @@ export default function MessageBubble({
   searchQuery = '',
   onMessageClick,
   isSearchResult = false,
-  isHighlighted = false
+  isHighlighted = false,
+  onReactionAdd,
+  onReactionRemove
 }: MessageBubbleProps) {
   const { data: session } = useSession()
   const { isAdmin } = useRole()
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
-  const [message, setMessage] = useState<Message>(initialMessage)
-  const [replyCount, setReplyCount] = useState(initialMessage.replyCount || 0)
   const emojiButtonRef = useRef<HTMLButtonElement>(null)
   const [showUserStatus, setShowUserStatus] = useState(false)
   const avatarRef = useRef<HTMLDivElement>(null)
@@ -57,46 +66,10 @@ export default function MessageBubble({
   const { onlineUsers } = useOnlineUsers()
 
   const effectiveChatId = chatType === 'channel' 
-    ? message.channelId 
-    : message.receiverId 
-      ? [message.userId, message.receiverId].sort().join('-')
+    ? initialMessage.channelId 
+    : initialMessage.receiverId 
+      ? [initialMessage.userId, initialMessage.receiverId].sort().join('-')
       : chatId;
-
-  useEffect(() => {
-    setMessage(initialMessage)
-    setReplyCount(initialMessage.replyCount || 0)
-  }, [initialMessage])
-
-  useEffect(() => {
-    if (!effectiveChatId) return;
-
-    const channelName = `presence-${chatType}-${effectiveChatId}`;
-    debug(`Subscribing to channel: ${channelName}`);
-
-    const channel = pusherClient.subscribe(channelName);
-
-    const handleThreadUpdate = (data: { 
-      messageId?: string;
-      threadId?: string;
-      replyCount: number;
-    }) => {
-      const targetId = data.messageId || data.threadId;
-      if (targetId === message.id) {
-        setReplyCount(data.replyCount);
-      }
-    };
-
-    channel.bind('update-thread', handleThreadUpdate);
-    channel.bind('thread-updated', handleThreadUpdate);
-    channel.bind('thread-count-update', handleThreadUpdate);
-
-    return () => {
-      channel.unbind('update-thread', handleThreadUpdate);
-      channel.unbind('thread-updated', handleThreadUpdate);
-      channel.unbind('thread-count-update', handleThreadUpdate);
-      pusherClient.unsubscribe(channelName);
-    };
-  }, [effectiveChatId, chatType, message.id, message.userId, message.receiverId]);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -118,132 +91,12 @@ export default function MessageBubble({
     };
   }, [showEmojiPicker]);
 
-  const userName = message.user?.name || 'Unknown User'
-  const userImage = message.user?.image || '/default-avatar.png'
-  const isOnline = onlineUsers?.has(message.userId)
-
-  const handleReaction = async (emoji: string) => {
-    if (!session?.user?.id || !effectiveChatId) return;
-    
-    try {
-      debug('Sending reaction:', { 
-        emoji, 
-        messageId: message.id, 
-        chatType, 
-        chatId: effectiveChatId 
-      });
-
-      const response = await fetch('/api/messages/reaction', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          messageId: message.id,
-          emoji,
-          chatType,
-          chatId: effectiveChatId
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to add reaction');
-      }
-
-      const data = await response.json();
-      debug('Reaction added successfully:', data);
-      setShowEmojiPicker(false);
-    } catch (error) {
-      debug('Error adding reaction:', error);
-    }
-  };
-
-  const handleRemoveReaction = async (reactionId: string) => {
-    try {
-      const response = await fetch(`/api/messages/reaction?reactionId=${reactionId}`, {
-        method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          chatType,
-          chatId: effectiveChatId
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to remove reaction');
-      }
-    } catch (error) {
-      debug('Error removing reaction:', error);
-    }
-  };
-
-  useEffect(() => {
-    if (!effectiveChatId) return;
-
-    const channelName = `presence-${chatType}-${effectiveChatId}`;
-    debug(`Subscribing to channel: ${channelName}`);
-
-    const channel = pusherClient.subscribe(channelName);
-
-    const handleReactionAdded = (data: { messageId: string, reaction: Reaction }) => {
-      debug('Reaction added event received:', data);
-      if (data.messageId === message.id) {
-        debug('Updating message with new reaction');
-        setMessage(prev => ({
-          ...prev,
-          reactions: [...(prev.reactions || []), data.reaction]
-        }));
-      }
-    };
-
-    const handleReactionRemoved = (data: { messageId: string, reactionId: string }) => {
-      debug('Reaction removed event received:', data);
-      if (data.messageId === message.id) {
-        debug('Removing reaction from message');
-        setMessage(prev => ({
-          ...prev,
-          reactions: (prev.reactions || []).filter(r => r.id !== data.reactionId)
-        }));
-      }
-    };
-
-    channel.bind('reaction-added', handleReactionAdded);
-    channel.bind('reaction-removed', handleReactionRemoved);
-
-    return () => {
-      debug(`Cleaning up Pusher subscription for: ${channelName}`);
-      channel.unbind('reaction-added', handleReactionAdded);
-      channel.unbind('reaction-removed', handleReactionRemoved);
-      pusherClient.unsubscribe(channelName);
-    };
-  }, [effectiveChatId, chatType, message.id]);
-
-  const handleReactionClick = async (reaction: Reaction) => {
-    if (!session?.user?.id) return;
-
-    // If the user has already reacted with this emoji, remove their reaction
-    const userHasReacted = message.reactions?.some(
-      r => r.emoji === reaction.emoji && r.userId === session.user.id
-    );
-
-    if (userHasReacted) {
-      // Find the user's reaction to remove
-      const userReaction = message.reactions?.find(
-        r => r.emoji === reaction.emoji && r.userId === session.user.id
-      );
-      if (userReaction) {
-        await handleRemoveReaction(userReaction.id);
-      }
-    } else {
-      // Add the same reaction
-      await handleReaction(reaction.emoji);
-    }
-  };
+  const userName = initialMessage.user?.name || 'Unknown User'
+  const userImage = initialMessage.user?.image || '/default-avatar.png'
+  const isOnline = onlineUsers?.has(initialMessage.userId)
 
   // Group reactions by emoji
-  const groupedReactions = message.reactions?.reduce((acc, reaction) => {
+  const groupedReactions = initialMessage.reactions?.reduce((acc, reaction) => {
     if (!acc[reaction.emoji]) {
       acc[reaction.emoji] = {
         users: [],
@@ -251,34 +104,64 @@ export default function MessageBubble({
         hasReacted: false
       };
     }
-    acc[reaction.emoji].users.push(reaction.user.name);
+    if (reaction.user?.name) {
+      acc[reaction.emoji].users.push(reaction.user.name);
+    }
     acc[reaction.emoji].count++;
     if (reaction.userId === session?.user?.id) {
       acc[reaction.emoji].hasReacted = true;
     }
     return acc;
-  }, {} as { [key: string]: { users: string[], count: number, hasReacted: boolean } });
+  }, {} as { [key: string]: { users: string[], count: number, hasReacted: boolean } }) || {};
+
+  const handleReaction = (emoji: string) => {
+    if (!session?.user?.id) return;
+    onReactionAdd?.(initialMessage.id, emoji);
+    setShowEmojiPicker(false);
+  };
+
+  const handleReactionClick = (reaction: Reaction) => {
+    if (!session?.user?.id) return;
+
+    // If the user has already reacted with this emoji, remove their reaction
+    const userHasReacted = initialMessage.reactions?.some(
+      r => r.emoji === reaction.emoji && r.userId === session.user.id
+    );
+
+    if (userHasReacted) {
+      // Find the user's reaction to remove
+      const userReaction = initialMessage.reactions?.find(
+        r => r.emoji === reaction.emoji && r.userId === session.user.id
+      );
+      if (userReaction) {
+        onReactionRemove?.(initialMessage.id, userReaction.id);
+      }
+    } else {
+      // Add the same reaction
+      handleReaction(reaction.emoji);
+    }
+  };
 
   const renderContent = () => {
-    if (message.fileUrl) {
+    if (initialMessage.fileUrl) {
       return (
         <div className="mt-1">
-          {message.fileType?.startsWith('image/') ? (
+          {initialMessage.fileType?.startsWith('image/') ? (
             <Image
-              src={message.fileUrl}
-              alt={message.fileName || 'Uploaded image'}
+              src={initialMessage.fileUrl}
+              alt={initialMessage.fileName || 'Uploaded image'}
               width={200}
               height={200}
               className="rounded-md"
             />
           ) : (
             <a
-              href={message.fileUrl}
+              href={initialMessage.fileUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="text-blue-500 hover:underline"
             >
-              {message.fileName || 'Download file'}
+              {initialMessage.fileName || 'Download file'}
             </a>
           )}
         </div>
@@ -286,56 +169,35 @@ export default function MessageBubble({
     }
 
     const highlightedContent = searchQuery
-      ? message.content.replace(
+      ? initialMessage.content.replace(
           new RegExp(`(${searchQuery})`, 'gi'),
           '<mark class="bg-yellow-300 text-black">$1</mark>'
         )
-      : message.content;
+      : initialMessage.content;
 
     return (
       <div className="whitespace-pre-wrap break-words">
         {searchQuery ? (
           <div dangerouslySetInnerHTML={{ __html: highlightedContent }} />
         ) : (
-          message.content
+          initialMessage.content
         )}
       </div>
     );
   };
 
-  // Subscribe to thread count updates and message deletions
-  useEffect(() => {
-    const threadChannel = `thread-${message.id}`;
-    const channel = pusherClient.subscribe(threadChannel);
-
-    // Handle thread count updates from new messages and deletions
-    const handleThreadCountUpdate = (data: { replyCount: number }) => {
-      debug(`Received thread count update for ${message.id}: ${data.replyCount}`);
-      setReplyCount(data.replyCount);
-    };
-
-    channel.bind('thread-count-update', handleThreadCountUpdate);
-    channel.bind('thread-reply-deleted', handleThreadCountUpdate);
-
-    return () => {
-      channel.unbind('thread-count-update', handleThreadCountUpdate);
-      channel.unbind('thread-reply-deleted', handleThreadCountUpdate);
-      pusherClient.unsubscribe(threadChannel);
-    };
-  }, [message.id]);
-
   // Add status fetching effect
   useEffect(() => {
-    if (showUserStatus && message.user?.id && !statuses[message.user.id]) {
-      fetchStatus(message.user.id);
+    if (showUserStatus && initialMessage.user?.id && !statuses[initialMessage.user.id]) {
+      fetchStatus(initialMessage.user.id);
     }
-  }, [showUserStatus, message.user?.id, fetchStatus, statuses]);
+  }, [showUserStatus, initialMessage.user?.id, fetchStatus, statuses]);
 
   const handleDelete = async () => {
     if (!session?.user?.id) return;
     
     try {
-      const response = await fetch(`/api/messages/${message.id}`, {
+      const response = await fetch(`/api/messages/${initialMessage.id}`, {
         method: 'DELETE',
       });
 
@@ -360,7 +222,7 @@ export default function MessageBubble({
           isHighlighted ? 'animate-highlight bg-yellow-100 dark:bg-yellow-900' : ''
         }`}
       onClick={isSearchResult ? onMessageClick : undefined}
-      id={`message-${message.id}`}
+      id={`message-${initialMessage.id}`}
     >
       <div 
         ref={avatarRef}
@@ -378,10 +240,10 @@ export default function MessageBubble({
         {isOnline && (
           <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white dark:border-gray-900 rounded-full"></div>
         )}
-        {showUserStatus && message.user?.id && statuses[message.user.id] && avatarRef.current && (
+        {showUserStatus && initialMessage.user?.id && statuses[initialMessage.user.id] && avatarRef.current && (
           <StatusTooltip 
-            emoji={statuses[message.user.id]?.emoji} 
-            text={statuses[message.user.id]?.text}
+            emoji={statuses[initialMessage.user.id]?.emoji} 
+            text={statuses[initialMessage.user.id]?.text}
             targetRef={avatarRef.current}
           />
         )}
@@ -390,22 +252,35 @@ export default function MessageBubble({
       <div className="flex-1 min-w-0">
         <div className="flex items-center space-x-2">
           <span className="font-medium text-sm">{userName}</span>
-          {message.user?.role === 'ADMIN' && (
-            <Shield className="w-4 h-4 text-blue-400" title="Admin" />
+          {initialMessage.user?.role === 'ADMIN' && (
+            <Shield 
+              className="w-4 h-4 text-blue-400" 
+              aria-label="Admin"
+            />
           )}
-          <span className="text-xs text-gray-500">
-            {isToday(new Date(message.createdAt))
-              ? format(new Date(message.createdAt), 'h:mm a')
-              : format(new Date(message.createdAt), 'MMMM d, h:mm a')}
+          <span className="text-xs text-gray-500 dark:text-gray-400">
+            {(() => {
+              try {
+                const date = new Date(initialMessage.createdAt);
+                if (isNaN(date.getTime())) {
+                  return 'Invalid date';
+                }
+                return isToday(date)
+                  ? format(date, 'h:mm a')
+                  : format(date, 'MMMM d, h:mm a');
+              } catch (error) {
+                return 'Invalid date';
+              }
+            })()}
           </span>
         </div>
 
         {renderContent()}
 
-        {message.reactions && message.reactions.length > 0 && (
+        {initialMessage.reactions && initialMessage.reactions.length > 0 && (
           <div className="flex flex-wrap gap-1 mt-2">
             {Object.entries(groupedReactions || {}).map(([emoji, { users, count, hasReacted }]) => {
-              const userReaction = message.reactions?.find(
+              const userReaction = initialMessage.reactions?.find(
                 r => r.emoji === emoji && r.userId === session?.user?.id
               );
               
@@ -413,7 +288,7 @@ export default function MessageBubble({
                 <button
                   key={emoji}
                   onClick={() => handleReactionClick(
-                    userReaction || message.reactions?.find(r => r.emoji === emoji)!
+                    userReaction || initialMessage.reactions?.find(r => r.emoji === emoji)!
                   )}
                   className={`inline-flex items-center px-2 py-1 rounded-full text-xs
                     bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600
@@ -432,7 +307,7 @@ export default function MessageBubble({
           </div>
         )}
 
-        {showThread && replyCount > 0 && (
+        {showThread && (initialMessage.replyCount ?? 0) > 0 && (
           <div className="mt-1">
             <button 
               onClick={onThreadClick}
@@ -440,7 +315,7 @@ export default function MessageBubble({
                        dark:text-blue-400 dark:hover:text-blue-300 hover:underline"
             >
               <MessageSquare className="w-3.5 h-3.5" />
-              <span>{replyCount} {replyCount === 1 ? 'reply' : 'replies'}</span>
+              <span>{initialMessage.replyCount} {initialMessage.replyCount === 1 ? 'reply' : 'replies'}</span>
             </button>
           </div>
         )}

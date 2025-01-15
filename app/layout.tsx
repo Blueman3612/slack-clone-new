@@ -9,6 +9,7 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { cn } from '@/lib/utils'
 import { OnlineUsersProvider } from '@/contexts/OnlineUsersContext'
+import { PusherProvider } from '@/contexts/PusherContext'
 import { redirect } from 'next/navigation'
 
 const inter = Inter({ subsets: ['latin'] })
@@ -25,18 +26,19 @@ export default async function RootLayout({
 }) {
   const session = await getServerSession(authOptions);
 
-  // Create a middleware.ts file if you haven't already
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={cn("bg-white dark:bg-gray-900", inter.className)}>
         <SessionProvider session={session}>
           <ThemeProvider attribute="class" defaultTheme="dark">
-            <OnlineUsersProvider>
-              <UserStatusProvider>
-                {children}
-                <Toaster />
-              </UserStatusProvider>
-            </OnlineUsersProvider>
+            <PusherProvider>
+              <OnlineUsersProvider>
+                <UserStatusProvider>
+                  {children}
+                  <Toaster />
+                </UserStatusProvider>
+              </OnlineUsersProvider>
+            </PusherProvider>
           </ThemeProvider>
         </SessionProvider>
       </body>

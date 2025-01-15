@@ -2,10 +2,10 @@
 
 import { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react'
 import { useSession, signOut } from 'next-auth/react'
-import { pusherClient } from '@/lib/pusher'
 import { Message, Reaction } from '@/types'
 import MessageBubble from './MessageBubble'
 import { useOnlineUsers } from '@/contexts/OnlineUsersContext'
+import { usePusher } from '@/contexts/PusherContext'
 import TypingIndicator from './TypingIndicator'
 import ThreadView from './ThreadView'
 import axios from 'axios'
@@ -17,12 +17,35 @@ import { LogOut } from 'lucide-react';
 import { createBluemanChat } from '@/lib/ai-chat';
 import { highlightText } from '@/utils/highlightText';
 
+// Add debug function at the top level
+const debug = (...args: any[]) => {
+  if (process.env.NODE_ENV === 'development') {
+    const message = args[0];
+    const isCritical = 
+      message.includes('Error:') || 
+      message.includes('failed') ||
+      message.includes('reaction');
+      
+    if (isCritical) {
+      console.debug('[ChatInterface]', ...args);
+    }
+  }
+};
+
 interface Props {
   chatId: string;
   chatType: 'channel' | 'dm';
   currentUserId: string;
   initialMessages: Message[];
   initialLastReadTimestamp?: string;
+}
+
+interface ThreadMessage extends Message {
+  reactions: Reaction[];
+}
+
+interface MessageWithThread extends Message {
+  threadMessages?: ThreadMessage[];
 }
 
 export default function ChatInterface({ 
@@ -61,14 +84,16 @@ export default function ChatInterface({
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [isMessageSending, setIsMessageSending] = useState(false);
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
+  const { subscribeToChannel, unsubscribeFromChannel } = usePusher();
 
   // Add this helper function at the top of the component
   const getMessageDate = (message: Message): Date => {
-    return message.createdAt instanceof Date ? message.createdAt : new Date(message.createdAt);
+    return new Date(message.createdAt);
   };
 
   // Update the comparison functions
   const isMessageAfterTimestamp = (message: Message, timestamp: string) => {
+    if (!timestamp) return false;
     const messageDate = new Date(message.createdAt).getTime();
     const compareDate = new Date(timestamp).getTime();
     return messageDate > compareDate;
@@ -77,12 +102,8 @@ export default function ChatInterface({
   // Add this function to parse timestamps safely
   const parseTimestamp = (timestamp: string | null): number => {
     if (!timestamp) return 0;
-    // If it's already a number (stored as string), parse it directly
-    if (!isNaN(Number(timestamp))) {
-      return Number(timestamp);
-    }
-    // Otherwise try to parse as ISO date string
-    return new Date(timestamp).getTime();
+    const parsed = Number(timestamp);
+    return !isNaN(parsed) ? parsed : new Date(timestamp).getTime();
   };
 
   // Handle typing events
@@ -90,8 +111,8 @@ export default function ChatInterface({
     if (!chatId || !session?.user) return;
 
     const channelName = chatType === 'channel'
-      ? `channel-${chatId}`
-      : `dm-${[currentUserId, chatId].sort().join('-')}`;
+      ? `presence-channel-${chatId}`
+      : `presence-dm-${[currentUserId, chatId].sort().join('-')}`;
 
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current);
@@ -100,7 +121,7 @@ export default function ChatInterface({
     try {
       await axios.post('/api/pusher/trigger-event', {
         channel: channelName,
-        event: 'typing',
+        event: 'client-typing',
         data: {
           userId: currentUserId,
           name: session.user.name || 'Anonymous'
@@ -110,7 +131,7 @@ export default function ChatInterface({
       typingTimeoutRef.current = setTimeout(async () => {
         await axios.post('/api/pusher/trigger-event', {
           channel: channelName,
-          event: 'stop-typing',
+          event: 'client-stop-typing',
           data: {
             userId: currentUserId,
             name: session.user.name || 'Anonymous'
@@ -169,7 +190,7 @@ export default function ChatInterface({
         const data = await response.json();
         setMessages(data);
       } catch (error) {
-        console.error('Error fetching messages:', error);
+        debug('Error: Failed to fetch messages -', error);
         setError('Failed to load messages');
       } finally {
         setIsLoadingInitial(false);
@@ -183,8 +204,26 @@ export default function ChatInterface({
   useEffect(() => {
     setMessages([]);
     setTypingUsers([]);
+    
+    // Clean up old subscription if it exists
+    if (currentChannelRef.current && currentChannelRef.current !== chatId) {
+      const oldChannel = currentChannelRef.current;
+      debug(`Cleaning up old subscription for: ${oldChannel}`);
+      unsubscribeFromChannel(oldChannel);
+    }
+    
     currentChannelRef.current = chatId;
-  }, [chatId]);
+  }, [chatId, unsubscribeFromChannel]);
+
+  // Add cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (currentChannelRef.current) {
+        debug(`Cleaning up on unmount: ${currentChannelRef.current}`);
+        unsubscribeFromChannel(currentChannelRef.current);
+      }
+    };
+  }, [unsubscribeFromChannel]);
 
   // Modify this effect to not scroll when opening threads
   useEffect(() => {
@@ -202,7 +241,7 @@ export default function ChatInterface({
         if (chatType === 'channel') {
           const response = await fetch(`/api/channels/${chatId}`);
           if (!response.ok) {
-            console.error('Failed to fetch channel:', await response.text());
+            debug('Error: Failed to fetch channel details');
             throw new Error('Failed to fetch channel');
           }
           const channel = await response.json();
@@ -210,14 +249,14 @@ export default function ChatInterface({
         } else {
           const response = await fetch(`/api/users/${chatId}`);
           if (!response.ok) {
-            console.error('Failed to fetch user:', await response.text());
+            debug('Error: Failed to fetch user details');
             throw new Error('Failed to fetch user');
           }
           const user = await response.json();
           setChatName(user.name || 'Unknown User');
         }
       } catch (error) {
-        console.error('Error fetching chat name:', error);
+        debug('Error: Failed to fetch chat name -', error);
         setChatName(chatType === 'channel' ? '#unknown-channel' : 'Unknown User');
         setError(`Failed to fetch ${chatType === 'channel' ? 'channel' : 'user'} information`);
       }
@@ -254,7 +293,7 @@ export default function ChatInterface({
     e.preventDefault();
     if (!message.trim() || isMessageSending || !session?.user) return;
 
-    const now = new Date();
+    const now = new Date().toISOString();
     const tempId = `temp-${Date.now()}`;
     const tempMessage: Message = {
       id: tempId,
@@ -352,13 +391,13 @@ export default function ChatInterface({
             }
           }
         } catch (error) {
-          console.error('Error in AI chat flow:', error);
+          debug('Error: AI chat flow failed -', error);
         } finally {
           setIsBluemanTyping(false);
         }
       }
     } catch (error) {
-      console.error('Error sending message:', error);
+      debug('Error: Failed to send message -', error);
       setMessages(prev => prev.filter(m => m.id !== tempId));
     } finally {
       setIsMessageSending(false);
@@ -402,31 +441,13 @@ export default function ChatInterface({
         }),
       });
     } catch (error) {
-      console.error('Upload error:', error);
-      // You might want to add a toast notification here
+      debug('Error: File upload failed -', error);
     } finally {
       setIsUploading(false);
     }
   };
 
   const handleSearch = async (query: string, results: any) => {
-    console.log('Search results:', {
-      query,
-      resultCount: Object.keys(results).length,
-      groups: Object.entries(results).map(([key, group]: [string, any]) => ({
-        key,
-        type: group.type,
-        name: group.name,
-        messageCount: group.messages.length,
-        messages: group.messages.map((m: any) => ({
-          id: m.id,
-          content: m.content,
-          channelId: m.channelId,
-          userId: m.userId
-        }))
-      }))
-    });
-    
     setSearchResults(results);
     setCurrentSearchQuery(query);
   };
@@ -517,8 +538,8 @@ export default function ChatInterface({
         messages.length > initialMessages.length && 
         !currentSearchQuery) {
       const isNewMessage = messages[messages.length - 1] && 
-        new Date(messages[messages.length - 1].createdAt).getTime() > 
-        new Date(Date.now() - 1000).getTime();
+        messages[messages.length - 1].createdAt > 
+        new Date(Date.now() - 1000).toISOString();
       
       if (isNewMessage) {
         scrollToBottom();
@@ -530,11 +551,8 @@ export default function ChatInterface({
   useEffect(() => {
     // Only set shouldScrollToBottom for truly new messages, not when loading from search
     if (!pendingMessageId && !currentSearchQuery && messages.length > initialMessages.length) {
-      const isNewMessage = messages[messages.length - 1] && 
-        new Date(messages[messages.length - 1].createdAt).getTime() > 
-        new Date(Date.now() - 1000).getTime(); // Message created in last second
-      
-      if (isNewMessage) {
+      const lastMessage = messages[messages.length - 1];
+      if (lastMessage && lastMessage.createdAt > new Date(Date.now() - 1000).toISOString()) {
         setShouldScrollToBottom(true);
       }
     }
@@ -545,149 +563,244 @@ export default function ChatInterface({
     setSelectedThread(message);
   };
 
-  // Add this function to handle scrolling to unread messages
-  const scrollToUnreadLine = () => {
-    const unreadMarker = document.querySelector('.unread-messages-line');
-    if (unreadMarker) {
-      unreadMarker.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
+  // Add handler for closing thread
+  const handleThreadClose = () => {
+    setSelectedThread(null);
   };
-
-  // Add this effect to scroll to unread line when it appears
-  useEffect(() => {
-    if (lastReadTimestamp) {
-      scrollToUnreadLine();
-    }
-  }, [lastReadTimestamp]);
-
-  // Add this effect to update last read timestamp when leaving the channel
-  useEffect(() => {
-    return () => {
-      if (messages.length > 0) {
-        const lastMessageTime = new Date(messages[messages.length - 1].createdAt).getTime();
-        console.log('Storing last read timestamp:', lastMessageTime);
-        localStorage.setItem(`lastRead_${chatId}`, lastMessageTime.toString());
-      }
-    };
-  }, [chatId, messages]);
-
-  // Update the timestamp loading effect
-  useEffect(() => {
-    const storedTimestamp = localStorage.getItem(`lastRead_${chatId}`);
-    console.log('Loading stored timestamp:', {
-      chatId,
-      storedTimestamp,
-      parsed: parseTimestamp(storedTimestamp)
-    });
-    if (storedTimestamp) {
-      setLastReadTimestamp(storedTimestamp);
-    }
-  }, [chatId]);
 
   // Update the Pusher event handler
   useEffect(() => {
-    if (!chatId) return;
+    if (!chatId || !session?.user) return;
 
-    const channelName = chatType === 'channel'
-      ? `channel-${chatId}`
-      : `dm-${[currentUserId, chatId].sort().join('-')}`;
-
-    console.log('Subscribing to Pusher channel:', channelName);
+    const channelName = chatType === 'channel' 
+      ? `presence-channel-${chatId}` 
+      : `presence-dm-${[currentUserId, chatId].sort().join('-')}`;
     
-    const channel = pusherClient.subscribe(channelName);
+    debug(`Subscribing to channel: ${channelName}`);
+    
+    // Single subscription for all message updates
+    const handlers = {
+      onNewMessage: (data: any) => {
+        if (data.type === 'message-delete') {
+          debug('Received message deletion:', data);
+          setMessages(prev => prev.filter(m => m.id !== data.messageId));
+          
+          // If a thread was deleted, close the thread view
+          if (data.threadDeleted && selectedThread?.id === data.messageId) {
+            setSelectedThread(null);
+          }
+          return;
+        }
 
-    // Handle new messages
-    channel.bind('new-message', (newMessage: Message) => {
-      console.log('Received new message:', newMessage);
-      setMessages(prev => {
-        // Check if this is our own message that was just sent
-        const tempMessage = prev.find(m => 
-          m.id.startsWith('temp-') && 
-          m.content === newMessage.content &&
-          m.userId === newMessage.userId
-        );
+        debug('Received new message:', data);
+        setMessages(prev => {
+          // Check if this is our own message that was just sent
+          const tempMessage = prev.find(m => 
+            m.id.startsWith('temp-') && 
+            m.content === data.content &&
+            m.userId === data.userId
+          );
 
-        if (tempMessage) {
-          // Replace our temporary message with the real one, preserving user role and reactions
-          return prev.map(m => {
-            if (m.id === tempMessage.id) {
-              return {
-                ...newMessage,
-                user: {
-                  ...newMessage.user,
-                  role: tempMessage.user.role
-                },
-                reactions: newMessage.reactions || [] // Ensure reactions are initialized
-              };
+          // Check if we already have this message
+          const existingMessage = prev.find(m => m.id === data.id);
+          
+          if (tempMessage) {
+            // Replace our temporary message with the real one
+            return prev.map(m => {
+              if (m.id === tempMessage.id) {
+                return {
+                  ...data,
+                  user: {
+                    ...data.user,
+                    role: session?.user?.role
+                  },
+                  reactions: data.reactions || []
+                };
+              }
+              return m;
+            });
+          } else if (existingMessage) {
+            // Update existing message while preserving user properties
+            return prev.map(m => {
+              if (m.id === data.id) {
+                return {
+                  ...m,
+                  ...data,
+                  user: {
+                    ...m.user,
+                    ...data.user
+                  },
+                  reactions: data.reactions || []
+                };
+              }
+              return m;
+            });
+          }
+          
+          // For thread messages, update the parent message's reply count
+          if (data.threadId) {
+            return prev.map(m => {
+              if (m.id === data.threadId) {
+                return {
+                  ...m,
+                  replyCount: (m.replyCount || 0) + 1,
+                  lastReply: {
+                    content: data.content,
+                    user: data.user,
+                    createdAt: data.createdAt
+                  }
+                };
+              }
+              return m;
+            });
+          }
+          
+          // This is a new non-thread message
+          return [...prev, {
+            ...data,
+            reactions: data.reactions || []
+          }];
+        });
+      },
+      onTyping: (data: { userId: string; name: string }) => {
+        if (data.userId !== currentUserId) {
+          setTypingUsers(prev => {
+            if (!prev.includes(data.name)) {
+              return [...prev, data.name];
             }
-            return m;
+            return prev;
           });
         }
-
-        // For messages from other users, use the message as is
-        if (prev.some(m => m.id === newMessage.id)) {
-          return prev;
+      },
+      onStopTyping: (data: { userId: string; name: string }) => {
+        if (data.userId !== currentUserId) {
+          setTypingUsers(prev => prev.filter(name => name !== data.name));
+        }
+      },
+      onReaction: (data: { messageId: string; reaction: Reaction; type: 'add' | 'remove' }) => {
+        debug('Received reaction event:', data);
+        if (!data?.messageId || !data?.reaction) {
+          debug('Error: Invalid reaction data received:', data);
+          return;
         }
 
-        return [...prev, { ...newMessage, reactions: newMessage.reactions || [] }];
-      });
-    });
-
-    // Handle reaction updates
-    channel.bind('message-reaction', ({ messageId, reaction, type }: { messageId: string, reaction: Reaction, type: 'add' | 'remove' }) => {
-      setMessages(prev => prev.map(message => {
-        if (message.id === messageId) {
-          if (type === 'add') {
-            // Avoid duplicate reactions
-            if (message.reactions.some(r => r.id === reaction.id)) {
-              return message;
+        setMessages((prev: Message[]) => prev.map(message => {
+          if (message.id === data.messageId) {
+            const currentReactions = message.reactions || [];
+            
+            if (data.type === 'add') {
+              // Only add if not already present
+              if (!currentReactions.some(r => r.id === data.reaction.id)) {
+                debug('Adding reaction:', data.reaction);
+                return {
+                  ...message,
+                  reactions: [...currentReactions, data.reaction]
+                };
+              }
+            } else if (data.type === 'remove') {
+              debug('Removing reaction:', data.reaction);
+              // First try to remove by ID
+              if (data.reaction.id) {
+                return {
+                  ...message,
+                  reactions: currentReactions.filter(r => r.id !== data.reaction.id)
+                };
+              }
+              // Fallback to removing by emoji and userId if no ID
+              return {
+                ...message,
+                reactions: currentReactions.filter(r => 
+                  !(r.emoji === data.reaction.emoji && r.userId === data.reaction.userId)
+                )
+              };
             }
-            return {
-              ...message,
-              reactions: [...message.reactions, reaction]
-            };
-          } else {
-            return {
-              ...message,
-              reactions: message.reactions.filter(r => r.id !== reaction.id)
-            };
           }
+          return message;
+        }));
+
+        // If we have a selected thread, update its messages too
+        if (selectedThread) {
+          setSelectedThread(prev => {
+            if (!prev || prev.id !== data.messageId) return prev;
+            
+            const currentReactions = prev.reactions || [];
+            
+            if (data.type === 'add') {
+              // Only add if not already present
+              if (!currentReactions.some(r => r.id === data.reaction.id)) {
+                debug('Adding reaction to thread message:', data.reaction);
+                return {
+                  ...prev,
+                  reactions: [...currentReactions, data.reaction]
+                };
+              }
+            } else if (data.type === 'remove') {
+              debug('Removing reaction from thread message:', data.reaction);
+              // First try to remove by ID
+              if (data.reaction.id) {
+                return {
+                  ...prev,
+                  reactions: currentReactions.filter(r => r.id !== data.reaction.id)
+                };
+              }
+              // Fallback to removing by emoji and userId if no ID
+              return {
+                ...prev,
+                reactions: currentReactions.filter(r => 
+                  !(r.emoji === data.reaction.emoji && r.userId === data.reaction.userId)
+                )
+              };
+            }
+            return prev;
+          });
         }
-        return message;
-      }));
-    });
-
-    // Handle typing events
-    channel.bind('typing', (data: { userId: string; name: string }) => {
-      console.log('Typing event received:', data);
-      if (data.userId !== currentUserId) {
-        setTypingUsers(users => {
-          if (!users.includes(data.name)) {
-            return [...users, data.name];
+      },
+      onThreadUpdate: (data: { 
+        messageId: string;
+        replyCount: number;
+        lastReply: {
+          content: string;
+          user: any;
+          createdAt: string;
+        }
+      }) => {
+        setMessages(prev => prev.map(message => {
+          if (message.id === data.messageId) {
+            return {
+              ...message,
+              replyCount: data.replyCount,
+              lastReply: data.lastReply
+            };
           }
-          return users;
-        });
+          return message;
+        }));
       }
-    });
+    };
 
-    channel.bind('stop-typing', (data: { userId: string; name: string }) => {
-      console.log('Stop typing event received:', data);
-      if (data.userId !== currentUserId) {
-        setTypingUsers(users => users.filter(name => name !== data.name));
-      }
-    });
+    // Subscribe to the channel
+    subscribeToChannel(channelName, handlers);
 
-    // Handle message deletions
-    channel.bind('message-deleted', ({ messageId }: { messageId: string }) => {
-      setMessages(prev => prev.filter(m => m.id !== messageId));
-    });
+    // If we have a selected thread, also subscribe to the thread channel
+    if (selectedThread) {
+      const threadChannelName = `presence-thread-${selectedThread.id}`;
+      subscribeToChannel(threadChannelName, handlers);
+    }
+
+    // Keep track of the subscription
+    currentChannelRef.current = channelName;
 
     return () => {
-      console.log('Unsubscribing from Pusher channel:', channelName);
-      channel.unbind_all();
-      pusherClient.unsubscribe(channelName);
+      debug(`Cleaning up subscription for: ${channelName}`);
+      // Only unsubscribe when changing chats
+      if (chatId !== currentChannelRef.current) {
+        unsubscribeFromChannel(channelName);
+      }
+      // Always unsubscribe from thread channel
+      if (selectedThread) {
+        unsubscribeFromChannel(`presence-thread-${selectedThread.id}`);
+      }
     };
-  }, [chatId, chatType, currentUserId]);
+  }, [chatId, chatType, currentUserId, session?.user, subscribeToChannel, unsubscribeFromChannel, selectedThread]);
 
   // Update the useEffect for unread messages
   useEffect(() => {
@@ -702,6 +815,50 @@ export default function ChatInterface({
       // Handle unread messages...
     }
   }, [messages, lastReadTimestamp, currentUserId]);
+
+  const handleReactionAdd = async (messageId: string, emoji: string) => {
+    try {
+      const response = await fetch('/api/messages/reaction', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messageId,
+          emoji,
+          chatType,
+          chatId
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to add reaction');
+      }
+    } catch (error) {
+      debug('Error: Failed to add reaction -', error);
+    }
+  };
+
+  const handleReactionRemove = async (messageId: string, reactionId: string) => {
+    try {
+      const response = await fetch(`/api/messages/reaction?reactionId=${reactionId}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          chatType,
+          chatId
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to remove reaction');
+      }
+    } catch (error) {
+      debug('Error: Failed to remove reaction -', error);
+    }
+  };
 
   return (
     <div className="flex h-full w-full overflow-hidden">
@@ -785,53 +942,36 @@ export default function ChatInterface({
                 </div>
               ) : (
                 <div>
-                  {messages?.map((message, index) => {
-                    const messageTime = new Date(message.createdAt).getTime();
-                    const prevMessageTime = messages[index - 1] 
-                      ? new Date(messages[index - 1].createdAt).getTime() 
-                      : 0;
+                  {messages.map((msg, index) => {
+                    const messageDate = getMessageDate(msg);
                     const lastReadTime = parseTimestamp(lastReadTimestamp);
-
-                    const showUnreadLine = lastReadTimestamp && 
-                      prevMessageTime < lastReadTime && 
-                      messageTime > lastReadTime;
-
-                    // Add more detailed debug logging
-                    console.log('Message timestamp check:', {
-                      messageId: message.id,
-                      messageTime,
-                      prevMessageTime,
-                      lastReadTime,
-                      lastReadTimestamp,
-                      showUnreadLine,
-                      comparison: {
-                        prevLessThanRead: prevMessageTime < lastReadTime,
-                        msgGreaterThanRead: messageTime > lastReadTime
-                      }
-                    });
+                    const nextMessage = messages[index + 1];
+                    const showUnreadLine = lastReadTimestamp &&
+                      msg.userId !== currentUserId &&
+                      messageDate.getTime() > lastReadTime &&
+                      (!nextMessage || getMessageDate(nextMessage).getTime() <= lastReadTime);
 
                     return (
-                      <div key={message.id}>
-                        {showUnreadLine && (
-                          <div className="relative my-4 unread-messages-line">
-                            <div className="absolute inset-0 flex items-center">
-                              <div className="w-full border-t-2 border-red-500" />
-                            </div>
-                            <div className="relative flex justify-center">
-                              <span className="bg-gray-800 px-2 text-xs text-red-500 font-semibold">
-                                New Messages
-                              </span>
-                            </div>
-                          </div>
-                        )}
+                      <div key={msg.id}>
                         <MessageBubble
-                          message={message}
-                          isOwn={message.userId === currentUserId}
-                          onThreadClick={() => setSelectedThread(message)}
+                          key={msg.id}
+                          message={msg}
+                          isOwn={msg.userId === currentUserId}
+                          onThreadClick={() => handleThreadClick(msg)}
                           chatType={chatType}
                           chatId={chatId}
-                          isHighlighted={message.id === highlightedMessageId}
+                          searchQuery={currentSearchQuery}
+                          isHighlighted={msg.id === highlightedMessageId}
+                          onReactionAdd={handleReactionAdd}
+                          onReactionRemove={handleReactionRemove}
                         />
+                        {showUnreadLine && (
+                          <div className="unread-messages-line border-t-2 border-red-500 my-2 relative">
+                            <span className="absolute -top-3 left-4 bg-red-500 text-white px-2 py-0.5 rounded text-xs">
+                              New Messages
+                            </span>
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -896,7 +1036,7 @@ export default function ChatInterface({
         <div className="w-[40rem] border-l border-gray-200 dark:border-gray-700 flex-shrink-0">
           <ThreadView
             parentMessage={selectedThread}
-            onClose={() => setSelectedThread(null)}
+            onClose={handleThreadClose}
             chatType={chatType}
             chatId={chatId}
             currentUserId={currentUserId}

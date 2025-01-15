@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useSession } from 'next-auth/react';
-import { pusherClient } from '@/lib/pusher';
+import { usePusher } from '@/contexts/PusherContext';
 
 interface ThreadProps {
   parentMessage: any;
@@ -13,21 +13,24 @@ export default function Thread({ parentMessage, onClose }: ThreadProps) {
   const { data: session } = useSession();
   const [replies, setReplies] = useState<any[]>([]);
   const [newReply, setNewReply] = useState('');
+  const { subscribeToChannel, unsubscribeFromChannel } = usePusher();
 
   useEffect(() => {
     // Fetch initial replies
     fetchReplies();
 
-    // Subscribe to new replies
-    const channel = pusherClient.subscribe(`thread-${parentMessage.id}`);
-    channel.bind('reply:new', (reply: any) => {
-      setReplies((current) => [...current, reply]);
+    // Subscribe to new replies using PusherContext
+    const channelName = `thread-${parentMessage.id}`;
+    subscribeToChannel(channelName, {
+      onNewMessage: (reply: any) => {
+        setReplies((current) => [...current, reply]);
+      }
     });
 
     return () => {
-      pusherClient.unsubscribe(`thread-${parentMessage.id}`);
+      unsubscribeFromChannel(channelName);
     };
-  }, [parentMessage.id]);
+  }, [parentMessage.id, subscribeToChannel, unsubscribeFromChannel]);
 
   const fetchReplies = async () => {
     const response = await fetch(`/api/messages/${parentMessage.id}/replies`);

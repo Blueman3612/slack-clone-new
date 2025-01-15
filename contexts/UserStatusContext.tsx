@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useContext, useEffect, useState } from 'react';
-import { pusherClient } from '@/lib/pusher';
+import { usePusher } from './PusherContext';
 
 interface UserStatus {
   emoji?: string;
@@ -21,8 +21,16 @@ const UserStatusContext = createContext<UserStatusContextType | null>(null);
 
 export function UserStatusProvider({ children }: { children: React.ReactNode }) {
   const [statuses, setStatuses] = useState<UserStatuses>({});
+  const [lastFetch, setLastFetch] = useState<{[userId: string]: number}>({});
+  const { subscribeToChannel, unsubscribeFromChannel } = usePusher();
 
   const fetchStatus = async (userId: string) => {
+    // Check if we've fetched this status recently (within last 30 seconds)
+    const now = Date.now();
+    if (lastFetch[userId] && now - lastFetch[userId] < 30000) {
+      return;
+    }
+
     try {
       const response = await fetch(`/api/user/${userId}/status`);
       if (response.ok) {
@@ -31,46 +39,62 @@ export function UserStatusProvider({ children }: { children: React.ReactNode }) 
           ...prev,
           [userId]: status
         }));
+        // Update last fetch time
+        setLastFetch(prev => ({
+          ...prev,
+          [userId]: now
+        }));
+      } else if (response.status === 429) {
+        // If rate limited, wait before allowing another fetch
+        setLastFetch(prev => ({
+          ...prev,
+          [userId]: now + 30000 // Wait 30 seconds before trying again
+        }));
       }
     } catch (error) {
-      console.error('Error fetching user status:', error);
+      if (error instanceof Error) {
+        console.error('Error fetching user status:', error.message);
+      }
     }
   };
 
   // Subscribe to real-time status updates
   useEffect(() => {
-    const channel = pusherClient.subscribe('user-status');
+    const handlers = {
+      onNewMessage: (data: any) => {
+        if (data.type === 'status-update') {
+          setStatuses(prev => ({
+            ...prev,
+            [data.userId]: data.status
+          }));
+          // Update last fetch time since we just got fresh data
+          setLastFetch(prev => ({
+            ...prev,
+            [data.userId]: Date.now()
+          }));
+        } else if (data.type === 'status-delete') {
+          setStatuses(prev => {
+            const newStatuses = { ...prev };
+            delete newStatuses[data.userId];
+            return newStatuses;
+          });
+        }
+      }
+    };
 
-    // Handle status updates
-    channel.bind('status-update', (data: { 
-      userId: string;
-      status: UserStatus | null;
-    }) => {
-      console.log('Received status update:', data);
-      setStatuses(prev => ({
-        ...prev,
-        [data.userId]: data.status
-      }));
-    });
-
-    // Handle status deletions
-    channel.bind('status-deleted', (data: { userId: string }) => {
-      console.log('Received status deletion:', data);
-      setStatuses(prev => {
-        const newStatuses = { ...prev };
-        delete newStatuses[data.userId];
-        return newStatuses;
-      });
-    });
+    // Subscribe to the global presence channel for status updates
+    subscribeToChannel('presence-user-status', handlers);
 
     return () => {
-      channel.unbind_all();
-      pusherClient.unsubscribe('user-status');
+      unsubscribeFromChannel('presence-user-status');
     };
-  }, []);
+  }, [subscribeToChannel, unsubscribeFromChannel]);
 
   return (
-    <UserStatusContext.Provider value={{ statuses, fetchStatus }}>
+    <UserStatusContext.Provider value={{ 
+      statuses, 
+      fetchStatus,
+    }}>
       {children}
     </UserStatusContext.Provider>
   );

@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { User } from '@prisma/client';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Plus } from 'lucide-react';
-import { pusherClient } from '@/lib/pusher';
+import { usePusher } from '@/contexts/PusherContext';
 
 interface Channel {
   id: string;
@@ -23,37 +23,36 @@ export default function ChannelList({ currentUser }: ChannelListProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const currentChannelId = searchParams.get('channelId');
+  const { subscribeToChannel, unsubscribeFromChannel } = usePusher();
 
   useEffect(() => {
     fetchChannels();
 
-    // Subscribe to channel updates
-    const channel = pusherClient.subscribe('channel-updates');
-
-    channel.bind('channel-created', (newChannel: Channel) => {
-      setChannels(prev => {
-        if (prev.some(ch => ch.id === newChannel.id)) return prev;
-        return [...prev, newChannel];
-      });
-    });
-
-    channel.bind('channel-updated', (updatedChannel: Channel) => {
-      setChannels(prev => 
-        prev.map(ch => ch.id === updatedChannel.id ? updatedChannel : ch)
-      );
-    });
-
-    channel.bind('channel-deleted', (channelId: string) => {
-      setChannels(prev => prev.filter(ch => ch.id !== channelId));
-      if (currentChannelId === channelId) {
-        router.push('/chat');
+    // Subscribe to channel updates using PusherContext
+    subscribeToChannel('channel-updates', {
+      onNewMessage: (newChannel: Channel) => {
+        setChannels(prev => {
+          if (prev.some(ch => ch.id === newChannel.id)) return prev;
+          return [...prev, newChannel];
+        });
+      },
+      onThreadUpdate: (updatedChannel: Channel) => {
+        setChannels(prev => 
+          prev.map(ch => ch.id === updatedChannel.id ? updatedChannel : ch)
+        );
+      },
+      onReaction: (data: { channelId: string }) => {
+        setChannels(prev => prev.filter(ch => ch.id !== data.channelId));
+        if (currentChannelId === data.channelId) {
+          router.push('/chat');
+        }
       }
     });
 
     return () => {
-      pusherClient.unsubscribe('channel-updates');
+      unsubscribeFromChannel('channel-updates');
     };
-  }, [currentChannelId, router]);
+  }, [currentChannelId, router, subscribeToChannel, unsubscribeFromChannel]);
 
   const fetchChannels = async () => {
     try {

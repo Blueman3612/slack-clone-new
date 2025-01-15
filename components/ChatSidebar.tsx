@@ -11,7 +11,7 @@ import { Plus } from 'lucide-react';
 import { useOnlineUsers } from '@/contexts/OnlineUsersContext';
 import { useRole } from '@/hooks/useRole';
 import { cn } from '@/lib/utils';
-import PusherClient from 'pusher-js';
+import { usePusher } from '@/contexts/PusherContext';
 import { Session } from 'next-auth';
 
 interface Notification {
@@ -24,12 +24,13 @@ interface NotificationState {
   [key: string]: Notification;
 }
 
-interface ExtendedSession extends Session {
+interface ExtendedSession extends Omit<Session, 'user'> {
   user?: {
-    id?: string;
+    id: string;
     name?: string | null;
     email?: string | null;
     image?: string | null;
+    role?: string;
   };
 }
 
@@ -50,6 +51,7 @@ export default function ChatSidebar() {
   const { onlineUsers } = useOnlineUsers();
   const [notifications, setNotifications] = useState<NotificationState>({});
   const [bluemanUser, setBluemanUser] = useState<User | null>(null);
+  const { subscribeToChannel, unsubscribeFromChannel } = usePusher();
 
   console.log('Admin status:', {
     isAdmin,
@@ -59,7 +61,8 @@ export default function ChatSidebar() {
 
   useEffect(() => {
     const fetchUsers = async () => {
-      if (!session?.user?.id) return;
+      const user = session?.user;
+      if (!user?.id) return;
       
       try {
         const response = await fetch('/api/users', {
@@ -77,13 +80,13 @@ export default function ChatSidebar() {
         const blueman = data.find((user: User) => user.email === 'blueman@ai.local');
         if (blueman) {
           setBluemanUser(blueman);
-          const filteredUsers = data.filter((user: User) => 
-            user.id !== session.user.id && user.email !== 'blueman@ai.local'
+          const filteredUsers = data.filter((u: User) => 
+            u.id !== user.id && u.email !== 'blueman@ai.local'
           );
           setUsers(filteredUsers);
         } else {
-          const filteredUsers = data.filter((user: User) => 
-            user.id !== session.user.id
+          const filteredUsers = data.filter((u: User) => 
+            u.id !== user.id
           );
           setUsers(filteredUsers);
         }
@@ -97,7 +100,8 @@ export default function ChatSidebar() {
 
   useEffect(() => {
     const fetchChannels = async () => {
-      if (!session?.user?.id) return;
+      const user = session?.user;
+      if (!user?.id) return;
       
       try {
         const response = await fetch('/api/channels');
@@ -155,18 +159,19 @@ export default function ChatSidebar() {
   };
 
   const handleNewMessage = (message: any) => {
-    if (!session?.user?.id) return;
+    const user = session?.user;
+    if (!user?.id) return;
     
     console.log('Received message:', message);
     
     setNotifications(prev => {
-      if (message.userId === session.user.id) return prev;
+      if (message.userId === user.id) return prev;
 
       let key;
       let shouldNotify = true;
 
       if (message.receiverId) {
-        const isDMForCurrentUser = message.receiverId === session.user.id;
+        const isDMForCurrentUser = message.receiverId === user.id;
         if (!isDMForCurrentUser) return prev;
         
         key = `dm-${message.userId}`;
@@ -191,7 +196,7 @@ export default function ChatSidebar() {
       });
 
       const currentNotification = prev[key] || { count: 0, hasUnread: false, hasMention: false };
-      const hasMention = message.content.includes(`@${session.user.name}`) || 
+      const hasMention = message.content.includes(`@${user.name}`) || 
                         message.content.includes('@everyone');
 
       return {
@@ -206,34 +211,31 @@ export default function ChatSidebar() {
   };
 
   useEffect(() => {
-    if (!session?.user?.id) return;
+    const user = session?.user;
+    if (!user?.id) return;
 
-    const pusher = new PusherClient(process.env.NEXT_PUBLIC_PUSHER_KEY!, {
-      cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER!,
-    });
-
+    // Subscribe to all channel messages
     channels.forEach(channel => {
       const channelName = `channel-${channel.id}`;
-      const subscription = pusher.subscribe(channelName);
-      subscription.bind('new-message', handleNewMessage);
+      subscribeToChannel(channelName, {
+        onNewMessage: handleNewMessage
+      });
     });
 
-    if (session.user.id) {
-      const dmChannel = `dm-${session.user.id}`;
-      const dmSubscription = pusher.subscribe(dmChannel);
-      dmSubscription.bind('new-message', handleNewMessage);
-    }
+    // Subscribe to direct messages
+    const dmChannel = `dm-${user.id}`;
+    subscribeToChannel(dmChannel, {
+      onNewMessage: handleNewMessage
+    });
 
     return () => {
-      if (session.user.id) {
-        pusher.unsubscribe(`dm-${session.user.id}`);
-      }
+      // Cleanup subscriptions
+      unsubscribeFromChannel(`dm-${user.id}`);
       channels.forEach(channel => {
-        pusher.unsubscribe(`channel-${channel.id}`);
+        unsubscribeFromChannel(`channel-${channel.id}`);
       });
-      pusher.disconnect();
     };
-  }, [session?.user?.id, channels]);
+  }, [session?.user?.id, channels, subscribeToChannel, unsubscribeFromChannel]);
 
   useEffect(() => {
     if (currentChannelId) {
