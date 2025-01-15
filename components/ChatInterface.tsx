@@ -85,6 +85,8 @@ export default function ChatInterface({
   const [isMessageSending, setIsMessageSending] = useState(false);
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const { subscribeToChannel, unsubscribeFromChannel } = usePusher();
+  const [streamingMessage, setStreamingMessage] = useState<string>('');
+  const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
 
   // Add this helper function at the top of the component
   const getMessageDate = (message: Message): Date => {
@@ -349,6 +351,34 @@ export default function ChatInterface({
       if (isBluemanChat()) {
         setIsBluemanTyping(true);
         try {
+          // Create a temporary message for streaming
+          const streamId = `stream-${Date.now()}`;
+          setStreamingMessageId(streamId);
+          setStreamingMessage('');
+
+          const tempStreamMessage: Message = {
+            id: streamId,
+            content: '',
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            userId: chatId,
+            replyCount: 0,
+            reactions: [],
+            threadId: undefined,
+            user: {
+              id: chatId,
+              name: 'Blueman AI',
+              email: 'blueman@ai.com',
+              image: '/ai-avatars/blueman.png',
+              role: 'AI'
+            },
+            channelId: undefined,
+            receiverId: currentUserId
+          };
+
+          // Don't add the streaming message placeholder yet
+          let hasAddedMessage = false;
+
           // Get the last 10 messages for context, excluding the temp message
           const chatHistory = messages
             .filter(msg => msg.id !== tempId)
@@ -364,36 +394,105 @@ export default function ChatInterface({
             content: message.trim()
           });
 
-          const aiResponse = await fetch('/api/ai/blueman', {
+          const response = await fetch('/api/ai/blueman', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
-              message: message.trim(),
-              chatHistory
+              message: message.trim()
             }),
           });
 
-          const aiData = await aiResponse.json();
-          if (aiData.response) {
-            const bluemanResponse = await fetch('/api/messages', {
+          if (!response.ok) throw new Error('Failed to get AI response');
+          if (!response.body) throw new Error('No response body');
+
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let accumulatedResponse = '';
+
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+
+              const chunk = decoder.decode(value);
+              const lines = chunk.split('\n');
+
+              for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                  const data = line.slice(5).trim();
+                  if (data === '[DONE]') {
+                    debug('Received [DONE] message');
+                    continue;
+                  }
+
+                  try {
+                    const parsed = JSON.parse(data);
+                    if (parsed.text) {
+                      accumulatedResponse += parsed.text;
+                      setStreamingMessage(accumulatedResponse);
+                      
+                      // Add the message to the chat if this is the first token
+                      if (!hasAddedMessage) {
+                        hasAddedMessage = true;
+                        setIsBluemanTyping(false); // Hide typing indicator when content starts
+                        setMessages(prev => [...prev, { ...tempStreamMessage, content: parsed.text }]);
+                      } else {
+                        // Update the streaming message in real-time
+                        setMessages(prev => 
+                          prev.map(msg => 
+                            msg.id === streamId 
+                              ? { ...msg, content: accumulatedResponse }
+                              : msg
+                          )
+                        );
+                      }
+                    }
+                  } catch (e) {
+                    // Only log parsing errors for non-[DONE] messages
+                    if (data !== '[DONE]') {
+                      debug('Error parsing streaming data:', e);
+                      console.error('Failed to parse:', data);
+                    }
+                  }
+                }
+              }
+            }
+          } finally {
+            reader.releaseLock();
+          }
+
+          // Send the final message to the server
+          if (accumulatedResponse) {
+            const finalResponse = await fetch('/api/messages', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                content: aiData.response,
+                content: accumulatedResponse,
                 receiverId: currentUserId,
                 userId: chatId,
               }),
             });
 
-            if (bluemanResponse.ok) {
-              const bluemanMessageData = await bluemanResponse.json();
-              setMessages(prev => [...prev, bluemanMessageData]);
+            if (finalResponse.ok) {
+              const finalMessageData = await finalResponse.json();
+              // Replace the streaming message with the final one
+              setMessages(prev => 
+                prev.map(msg => 
+                  msg.id === streamId ? finalMessageData : msg
+                )
+              );
             }
           }
         } catch (error) {
           debug('Error: AI chat flow failed -', error);
+          // Remove the streaming message if there was an error
+          if (streamingMessageId) {
+            setMessages(prev => prev.filter(msg => msg.id !== streamingMessageId));
+          }
         } finally {
           setIsBluemanTyping(false);
+          setStreamingMessageId(null);
+          setStreamingMessage('');
         }
       }
     } catch (error) {
@@ -612,7 +711,7 @@ export default function ChatInterface({
                   ...data,
                   user: {
                     ...data.user,
-                    role: session?.user?.role
+                    role: data.user.role || session?.user?.role
                   },
                   reactions: data.reactions || []
                 };
@@ -628,7 +727,8 @@ export default function ChatInterface({
                   ...data,
                   user: {
                     ...m.user,
-                    ...data.user
+                    ...data.user,
+                    role: data.user.role || m.user.role
                   },
                   reactions: data.reactions || []
                 };
@@ -658,6 +758,10 @@ export default function ChatInterface({
           // This is a new non-thread message
           return [...prev, {
             ...data,
+            user: {
+              ...data.user,
+              role: data.user.role
+            },
             reactions: data.reactions || []
           }];
         });

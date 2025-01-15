@@ -96,12 +96,12 @@ async function main() {
         isAI: true,
         aiModel: 'blueman',
         image: '/ai-avatars/blueman.png',
-        role: 'USER'
+        role: 'AI'
       },
       create: {
         name: 'Blueman AI',
         email: 'blueman@ai.local',
-        role: 'USER',
+        role: 'AI',
         isAI: true,
         aiModel: 'blueman',
         image: '/ai-avatars/blueman.png',

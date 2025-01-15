@@ -35,4 +35,10 @@ export interface Message {
   fileUrl?: string;
   fileName?: string;
   fileType?: string;
+}
+
+export interface AIStreamCallbackHandler {
+  onToken?: (token: string) => void;
+  onComplete?: (fullText: string) => void;
+  onError?: (error: Error) => void;
 } 

@@ -5,7 +5,7 @@ import { format, isToday } from 'date-fns'
 import { Message, Reaction } from '@/types'
 import { useSession } from 'next-auth/react'
 import EmojiPicker from './EmojiPicker'
-import { MessageSquare, Shield, Trash2 } from 'lucide-react'
+import { MessageSquare, Shield, Trash2, Bot } from 'lucide-react'
 import Image from 'next/image'
 import { usePusher } from '@/contexts/PusherContext'
 import { highlightText } from '@/utils/highlightText'
@@ -256,6 +256,12 @@ export default function MessageBubble({
             <Shield 
               className="w-4 h-4 text-blue-400" 
               aria-label="Admin"
+            />
+          )}
+          {initialMessage.user?.role === 'AI' && (
+            <Bot 
+              className="w-4 h-4 text-purple-400" 
+              aria-label="AI Bot"
             />
           )}
           <span className="text-xs text-gray-500 dark:text-gray-400">
