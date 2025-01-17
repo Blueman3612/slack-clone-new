@@ -1004,15 +1004,14 @@ export default function ChatInterface({
             </div>
 
             <div className="sticky bottom-0 bg-white dark:bg-gray-900 border-t dark:border-gray-700">
-              {(typingUsers.length > 0 || isBluemanTyping) && (
-                <div className="px-4 py-2">
+              <div className="px-4 pt-1.5 min-h-[22px]">
+                {(typingUsers.length > 0 || isBluemanTyping) && (
                   <TypingIndicator 
                     typingUsers={isBluemanTyping ? ['Blueman AI'] : typingUsers} 
                   />
-                </div>
-              )}
-              
-              <form onSubmit={sendMessage} className="p-4">
+                )}
+              </div>
+              <form onSubmit={sendMessage} className="p-4 pt-2">
                 <div className="relative">
                   <input
                     type="text"

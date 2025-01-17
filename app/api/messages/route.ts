@@ -3,6 +3,9 @@ import { getServerSession } from "next-auth";
 import { prisma } from "@/lib/prisma";
 import { pusherServer } from "@/lib/pusher";
 import { authOptions } from "@/lib/auth";
+import { shouldBluemanRespond, getBluemanResponse } from "@/lib/blueman-ai";
+
+const BLUEMAN_ID = 'cm5vmlcru0001ujjcqeqz5743';
 
 export async function GET(request: Request) {
   try {
@@ -28,11 +31,11 @@ export async function GET(request: Request) {
         OR: [
           {
             userId: session.user.id,
-            receiverId: receiverId,
+            receiverId: receiverId || undefined,
             threadId: null,
           },
           {
-            userId: receiverId,
+            userId: receiverId || undefined,
             receiverId: session.user.id,
             threadId: null,
           },
@@ -59,24 +62,13 @@ export async function GET(request: Request) {
             },
           },
         },
-        threadMessages: {
-          select: {
-            id: true,
-          },
-        },
       },
       orderBy: {
         createdAt: 'asc',
       },
     });
 
-    const transformedMessages = messages.map(message => ({
-      ...message,
-      replyCount: message.threadMessages.length,
-      isThreadStarter: message.threadMessages.length > 0
-    }));
-
-    return NextResponse.json(transformedMessages);
+    return NextResponse.json(messages);
   } catch (error) {
     console.error("[MESSAGES_GET]", error);
     return new NextResponse("Internal Error", { status: 500 });
@@ -101,6 +93,100 @@ export async function POST(request: Request) {
 
     // Use provided userId (for Blueman responses) or session user id
     const messageUserId = userId || session.user.id;
+
+    // Don't process Blueman's own messages for auto-response
+    if (messageUserId !== BLUEMAN_ID) {
+      console.log('Checking if Blueman should respond to:', content);
+      
+      // Check if Blueman should respond to this message
+      const shouldRespond = await shouldBluemanRespond(content);
+      console.log('Should Blueman respond?', shouldRespond);
+      
+      if (shouldRespond && channelId) {
+        console.log('Getting Blueman response for channel:', channelId);
+        
+        // Start typing indicator
+        const channelName = `presence-channel-${channelId}`;
+        await pusherServer.trigger(channelName, 'client-typing', {
+          userId: BLUEMAN_ID,
+          name: 'Blueman AI'
+        });
+        
+        // Get Blueman's response
+        const bluemanResponse = await getBluemanResponse(content, channelId);
+        console.log('Blueman response:', bluemanResponse ? 'Generated' : 'None');
+        
+        if (bluemanResponse) {
+          // Schedule Blueman's response
+          const delay = Math.random() * 2000 + 1000;
+          console.log(`Scheduling Blueman response with ${delay}ms delay`);
+          
+          setTimeout(async () => {
+            try {
+              // Stop typing indicator before sending message
+              await pusherServer.trigger(channelName, 'client-stop-typing', {
+                userId: BLUEMAN_ID,
+                name: 'Blueman AI'
+              });
+
+              console.log('Creating Blueman response message');
+              const response = await prisma.message.create({
+                data: {
+                  content: bluemanResponse,
+                  userId: BLUEMAN_ID,
+                  channelId
+                },
+                include: {
+                  user: {
+                    select: {
+                      id: true,
+                      name: true,
+                      email: true,
+                      image: true,
+                      role: true,
+                    },
+                  },
+                  reactions: {
+                    include: {
+                      user: {
+                        select: {
+                          id: true,
+                          name: true,
+                          image: true,
+                        },
+                      },
+                    },
+                  },
+                },
+              });
+
+              // Trigger Pusher event for Blueman's response
+              await pusherServer.trigger(channelName, 'new-message', {
+                ...response,
+                reactions: response.reactions || [],
+                user: {
+                  ...response.user,
+                  role: response.user.role || 'USER'
+                }
+              });
+            } catch (error) {
+              // Make sure to stop typing indicator even if there's an error
+              await pusherServer.trigger(channelName, 'client-stop-typing', {
+                userId: BLUEMAN_ID,
+                name: 'Blueman AI'
+              });
+              console.error('Error sending Blueman response:', error);
+            }
+          }, delay);
+        } else {
+          // Stop typing indicator if no response was generated
+          await pusherServer.trigger(channelName, 'client-stop-typing', {
+            userId: BLUEMAN_ID,
+            name: 'Blueman AI'
+          });
+        }
+      }
+    }
 
     // Verify user exists (either sender or Blueman)
     const user = await prisma.user.findUnique({
@@ -132,20 +218,14 @@ export async function POST(request: Request) {
       }
     }
 
-    // Create message with proper data structure
-    const messageData = {
-      content: content.trim(),
-      userId: messageUserId, // Use the determined userId
-      isThreadStarter: false,
-      replyCount: 0,
-      ...(channelId ? { channelId } : {}),
-      ...(receiverId ? { receiverId } : {})
-    };
-
-    console.log('Creating message with data:', messageData);
-
+    // Create the message
     const message = await prisma.message.create({
-      data: messageData,
+      data: {
+        content,
+        userId: messageUserId,
+        channelId,
+        receiverId,
+      },
       include: {
         user: {
           select: {
@@ -153,8 +233,8 @@ export async function POST(request: Request) {
             name: true,
             email: true,
             image: true,
-            role: true
-          }
+            role: true,
+          },
         },
         reactions: {
           include: {
@@ -162,16 +242,16 @@ export async function POST(request: Request) {
               select: {
                 id: true,
                 name: true,
-                image: true
-              }
-            }
-          }
-        }
-      }
+                image: true,
+              },
+            },
+          },
+        },
+      },
     });
 
     // Trigger Pusher event for real-time updates
-    const channelName = channelId 
+    const channelName = channelId
       ? `presence-channel-${channelId}`
       : `presence-dm-${[session.user.id, receiverId].sort().join('-')}`;
 
@@ -187,6 +267,9 @@ export async function POST(request: Request) {
     return NextResponse.json(message);
   } catch (error) {
     console.error("[MESSAGES_POST]", error);
-    return NextResponse.json({ error: "Internal Error" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Internal Error" },
+      { status: 500 }
+    );
   }
 } 

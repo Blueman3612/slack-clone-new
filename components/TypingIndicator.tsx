@@ -14,12 +14,12 @@ const TypingIndicator = memo(function TypingIndicator({ typingUsers }: TypingInd
     : `${typingUsers[0]} and ${typingUsers.length - 1} others are typing...`;
 
   return (
-    <div className="px-4 py-2 text-sm text-gray-500 dark:text-gray-400">
-      <div className="flex items-center space-x-2">
-        <div className="flex space-x-1">
-          <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce [animation-delay:-0.3s]" />
-          <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce [animation-delay:-0.15s]" />
-          <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" />
+    <div className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
+      <div className="flex items-center space-x-1">
+        <div className="flex space-x-0.5">
+          <div className="w-1 h-1 bg-gray-400 rounded-full animate-bounce [animation-delay:-0.3s]" />
+          <div className="w-1 h-1 bg-gray-400 rounded-full animate-bounce [animation-delay:-0.15s]" />
+          <div className="w-1 h-1 bg-gray-400 rounded-full animate-bounce" />
         </div>
         <span>{text}</span>
       </div>

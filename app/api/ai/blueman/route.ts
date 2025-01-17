@@ -7,6 +7,7 @@ import { SystemMessage, HumanMessage } from '@langchain/core/messages';
 import { getNBAContext } from '@/lib/nba-knowledge';
 import { SYSTEM_TEMPLATE } from '@/lib/blueman-template';
 import { prisma } from '@/lib/prisma';
+import { getStoredNBANews } from '@/lib/news-fetcher';
 
 const BLUEMAN_ID = 'cm5vmlcru0001ujjcqeqz5743';
 
@@ -48,6 +49,21 @@ export async function POST(request: Request) {
     const nbaContext = await getNBAContext(message);
     console.log('NBA Context:', nbaContext);
 
+    // Get news context
+    console.log('Fetching news context');
+    const newsArticles = await getStoredNBANews();
+    const newsContext = newsArticles.length > 0 
+      ? newsArticles.slice(0, 15).map(article => {
+          const date = article.publishedAt.toLocaleDateString('en-US', {
+            weekday: 'short',
+            month: 'short',
+            day: 'numeric'
+          });
+          return `[${date}] ${article.title}\n${article.description || ''}`;
+        }).join('\n\n')
+      : 'No recent NBA news available.';
+    console.log('News Context:', newsContext);
+
     // Initialize the AI model
     const model = new ChatOpenAI({
       modelName: 'gpt-4',
@@ -60,6 +76,7 @@ export async function POST(request: Request) {
     const systemMessage = new SystemMessage({
       content: SYSTEM_TEMPLATE
         .replace('{nba_context}', nbaContext || 'No NBA data available.')
+        .replace('{news_context}', newsContext)
         .replace('{context}', '')
         .replace('{conversation_summary}', '')
         .replace('{chat_history}', formattedHistory)

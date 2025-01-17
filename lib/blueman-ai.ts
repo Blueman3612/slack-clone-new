@@ -1,6 +1,10 @@
 import { prisma } from './prisma';
 import { getNBAContext } from './nba-knowledge';
 import { NewsArticle } from '@prisma/client';
+import { ChatOpenAI } from '@langchain/openai';
+import { SystemMessage, HumanMessage } from '@langchain/core/messages';
+import { env } from '@/lib/env';
+import { SYSTEM_TEMPLATE } from '@/lib/blueman-template';
 
 interface MessageContext {
   recentMessages: string[];
@@ -9,6 +13,148 @@ interface MessageContext {
   userRole?: string;
 }
 
+// Keywords that might trigger Blueman's interest
+const TRIGGER_KEYWORDS = [
+  // General basketball terms
+  'nba', 'basketball', 'game', 'score', 'player',
+  'stats', 'team', 'trade', 'injury', 'season', 'playoff',
+  'championship', 'finals', 'draft', 'coach', 'roster',
+  
+  // Teams
+  'nuggets', 'timberwolves', 'wolves', 'lakers', 'warriors',
+  'celtics', 'bulls', 'heat', 'suns', 'mavs', 'mavericks',
+  'bucks', 'sixers', '76ers', 'nets', 'clippers',
+  
+  // Player references
+  'ant', 'anthony edwards', 'edwards', 'jokic', 'murray',
+  'lebron', 'curry', 'doncic', 'giannis', 'embiid'
+];
+
+// Function to check if Blueman should respond to a message
+export async function shouldBluemanRespond(message: string): Promise<boolean> {
+  const lowercaseMessage = message.toLowerCase();
+  
+  // Check if message contains any trigger keywords
+  const containsTriggerWord = TRIGGER_KEYWORDS.some(keyword => 
+    lowercaseMessage.includes(keyword.toLowerCase())
+  );
+
+  if (!containsTriggerWord) {
+    return false;
+  }
+
+  // Get NBA context to see if there's relevant information
+  const nbaContext = await getNBAContext(message);
+  
+  // Allow responses even without NBA context if it's about specific players or teams
+  const containsSpecificReference = lowercaseMessage.includes('anthony edwards') || 
+    lowercaseMessage.includes('timberwolves') ||
+    lowercaseMessage.includes('wolves');
+    
+  if (!nbaContext || nbaContext === 'No NBA data available.') {
+    return containsSpecificReference;
+  }
+
+  return true;
+}
+
+// Function to get Blueman's response to a message
+export async function getBluemanResponse(message: string, channelId: string): Promise<string | null> {
+  try {
+    // Get recent channel context
+    const recentMessages = await prisma.message.findMany({
+      where: {
+        channelId,
+        createdAt: {
+          gte: new Date(Date.now() - 5 * 60 * 1000) // Last 5 minutes
+        }
+      },
+      orderBy: {
+        createdAt: 'asc'
+      },
+      include: {
+        user: {
+          select: {
+            name: true
+          }
+        }
+      },
+      take: 10
+    });
+
+    const context: MessageContext = {
+      recentMessages: recentMessages.map(msg => 
+        `${msg.user.name}: ${msg.content}`
+      )
+    };
+
+    // Get NBA context
+    context.nbaContext = await getNBAContext(message);
+    console.log('NBA Context:', context.nbaContext);
+
+    // Get news context
+    const newsArticles = await prisma.newsArticle.findMany({
+      orderBy: {
+        publishedAt: 'desc'
+      },
+      take: 15
+    });
+
+    if (newsArticles.length > 0) {
+      context.newsContext = newsArticles.map(article => {
+        const date = article.publishedAt.toLocaleDateString('en-US', {
+          weekday: 'short',
+          month: 'short',
+          day: 'numeric'
+        });
+        return `[${date}] ${article.title}\n${article.description || ''}`;
+      }).join('\n\n');
+    }
+
+    console.log('Preparing Blueman response with context:', {
+      messageLength: message.length,
+      recentMessagesCount: context.recentMessages.length,
+      hasNBAContext: !!context.nbaContext,
+      hasNewsContext: !!context.newsContext
+    });
+
+    // Initialize the AI model
+    const model = new ChatOpenAI({
+      modelName: 'gpt-4',
+      temperature: 0.7,
+      openAIApiKey: env.OPENAI_API_KEY,
+      streaming: false
+    });
+
+    // Create the system message with the template
+    const systemMessage = new SystemMessage({
+      content: SYSTEM_TEMPLATE
+        .replace('{nba_context}', context.nbaContext || 'No NBA data available.')
+        .replace('{news_context}', context.newsContext || 'No recent news available.')
+        .replace('{context}', '')
+        .replace('{conversation_summary}', '')
+        .replace('{chat_history}', context.recentMessages.join('\n'))
+    });
+
+    // Create the user's message
+    const userMessage = new HumanMessage({
+      content: message
+    });
+
+    console.log('Sending request to AI model');
+    
+    // Get the complete response
+    const response = await model.invoke([systemMessage, userMessage]);
+    console.log('Got AI response');
+    
+    return response.content.toString();
+  } catch (error) {
+    console.error('Error in getBluemanResponse:', error);
+    return null;
+  }
+}
+
+// Function to get relevant news articles
 async function getRelevantNews(query: string): Promise<string> {
   try {
     const recentNews = await prisma.newsArticle.findMany({
