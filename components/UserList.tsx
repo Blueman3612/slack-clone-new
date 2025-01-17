@@ -96,7 +96,7 @@ export default function UserList({
             <div className="flex items-center gap-3">
               <div className="w-3 h-3 flex items-center justify-center">
                 {user.isAI === true ? (
-                  <Bot className="w-3 h-3 text-blue-500" />
+                  <Bot className="w-3 h-3 text-purple-500" />
                 ) : (
                   <div className={cn(
                     "w-3 h-3 rounded-full",

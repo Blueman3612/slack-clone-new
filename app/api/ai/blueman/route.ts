@@ -1,7 +1,14 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { createBluemanChat } from "@/lib/ai-chat";
+import { ChatOpenAI } from '@langchain/openai';
+import { env } from '@/lib/env';
+import { SystemMessage, HumanMessage } from '@langchain/core/messages';
+import { getNBAContext } from '@/lib/nba-knowledge';
+import { SYSTEM_TEMPLATE } from '@/lib/blueman-template';
+import { prisma } from '@/lib/prisma';
+
+const BLUEMAN_ID = 'cm5vmlcru0001ujjcqeqz5743';
 
 export async function POST(request: Request) {
   try {
@@ -20,43 +27,54 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Message is required" }, { status: 400 });
     }
 
-    console.log('Creating Blueman chat...');
-    const chat = await createBluemanChat(session.user.id);
-    
-    console.log('Getting response for:', message);
-    
-    // Use Response object for streaming
-    const encoder = new TextEncoder();
-    const customReadable = new ReadableStream({
-      async start(controller) {
-        try {
-          await chat(message, {
-            onToken: (token) => {
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ text: token })}\n\n`));
-            },
-            onComplete: () => {
-              controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-              controller.close();
-            },
-            onError: (err) => {
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: err.message })}\n\n`));
-              controller.close();
-            }
-          });
-        } catch (err) {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: err instanceof Error ? err.message : 'Unknown error' })}\n\n`));
-          controller.close();
-        }
-      }
+    // Get chat history
+    const chatHistory = await prisma.message.findMany({
+      where: {
+        OR: [
+          { userId: session.user.id, receiverId: BLUEMAN_ID },
+          { userId: BLUEMAN_ID, receiverId: session.user.id }
+        ]
+      },
+      orderBy: { createdAt: 'asc' },
+      take: 50
     });
 
-    return new Response(customReadable, {
-      headers: {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-      },
+    const formattedHistory = chatHistory.map(msg => 
+      `${msg.userId === BLUEMAN_ID ? 'Blueman' : 'User'}: ${msg.content}`
+    ).join('\n');
+
+    // Get NBA context
+    console.log('Fetching NBA context for:', message);
+    const nbaContext = await getNBAContext(message);
+    console.log('NBA Context:', nbaContext);
+
+    // Initialize the AI model
+    const model = new ChatOpenAI({
+      modelName: 'gpt-4',
+      temperature: 0.7,
+      openAIApiKey: env.OPENAI_API_KEY,
+      streaming: false
     });
+
+    // Create the system message with the template
+    const systemMessage = new SystemMessage({
+      content: SYSTEM_TEMPLATE
+        .replace('{nba_context}', nbaContext || 'No NBA data available.')
+        .replace('{context}', '')
+        .replace('{conversation_summary}', '')
+        .replace('{chat_history}', formattedHistory)
+    });
+
+    // Create the user's message
+    const userMessage = new HumanMessage({
+      content: message
+    });
+
+    // Get the complete response
+    const response = await model.invoke([systemMessage, userMessage]);
+    
+    return NextResponse.json({ text: response.content });
+    
   } catch (err) {
     console.error("[BLUEMAN_CHAT]", err);
     return NextResponse.json(

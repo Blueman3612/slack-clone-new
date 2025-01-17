@@ -351,14 +351,23 @@ export default function ChatInterface({
       if (isBluemanChat()) {
         setIsBluemanTyping(true);
         try {
-          // Create a temporary message for streaming
-          const streamId = `stream-${Date.now()}`;
-          setStreamingMessageId(streamId);
-          setStreamingMessage('');
+          const response = await fetch('/api/ai/blueman', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+              message: message.trim()
+            }),
+          });
 
-          const tempStreamMessage: Message = {
-            id: streamId,
-            content: '',
+          if (!response.ok) throw new Error('Failed to get AI response');
+          
+          const data = await response.json();
+          if (data.error) throw new Error(data.error);
+
+          // Create the AI message
+          const aiMessage: Message = {
+            id: `ai-${Date.now()}`,
+            content: data.text,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
             userId: chatId,
@@ -376,123 +385,33 @@ export default function ChatInterface({
             receiverId: currentUserId
           };
 
-          // Don't add the streaming message placeholder yet
-          let hasAddedMessage = false;
+          // Add the AI message to the chat
+          setMessages(prev => [...prev, aiMessage]);
 
-          // Get the last 10 messages for context, excluding the temp message
-          const chatHistory = messages
-            .filter(msg => msg.id !== tempId)
-            .slice(-10)
-            .map(msg => ({
-              role: msg.userId === chatId ? 'assistant' : 'user',
-              content: msg.content
-            }));
-
-          // Add the current message to chat history
-          chatHistory.push({
-            role: 'user',
-            content: message.trim()
-          });
-
-          const response = await fetch('/api/ai/blueman', {
+          // Store the message in the database
+          const finalResponse = await fetch('/api/messages', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-              message: message.trim()
+            body: JSON.stringify({
+              content: data.text,
+              receiverId: currentUserId,
+              userId: chatId,
             }),
           });
 
-          if (!response.ok) throw new Error('Failed to get AI response');
-          if (!response.body) throw new Error('No response body');
-
-          const reader = response.body.getReader();
-          const decoder = new TextDecoder();
-          let accumulatedResponse = '';
-
-          try {
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-
-              const chunk = decoder.decode(value);
-              const lines = chunk.split('\n');
-
-              for (const line of lines) {
-                if (line.startsWith('data: ')) {
-                  const data = line.slice(5).trim();
-                  if (data === '[DONE]') {
-                    debug('Received [DONE] message');
-                    continue;
-                  }
-
-                  try {
-                    const parsed = JSON.parse(data);
-                    if (parsed.text) {
-                      accumulatedResponse += parsed.text;
-                      setStreamingMessage(accumulatedResponse);
-                      
-                      // Add the message to the chat if this is the first token
-                      if (!hasAddedMessage) {
-                        hasAddedMessage = true;
-                        setIsBluemanTyping(false); // Hide typing indicator when content starts
-                        setMessages(prev => [...prev, { ...tempStreamMessage, content: parsed.text }]);
-                      } else {
-                        // Update the streaming message in real-time
-                        setMessages(prev => 
-                          prev.map(msg => 
-                            msg.id === streamId 
-                              ? { ...msg, content: accumulatedResponse }
-                              : msg
-                          )
-                        );
-                      }
-                    }
-                  } catch (e) {
-                    // Only log parsing errors for non-[DONE] messages
-                    if (data !== '[DONE]') {
-                      debug('Error parsing streaming data:', e);
-                      console.error('Failed to parse:', data);
-                    }
-                  }
-                }
-              }
-            }
-          } finally {
-            reader.releaseLock();
-          }
-
-          // Send the final message to the server
-          if (accumulatedResponse) {
-            const finalResponse = await fetch('/api/messages', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                content: accumulatedResponse,
-                receiverId: currentUserId,
-                userId: chatId,
-              }),
-            });
-
-            if (finalResponse.ok) {
-              const finalMessageData = await finalResponse.json();
-              // Replace the streaming message with the final one
-              setMessages(prev => 
-                prev.map(msg => 
-                  msg.id === streamId ? finalMessageData : msg
-                )
-              );
-            }
+          if (finalResponse.ok) {
+            const finalMessageData = await finalResponse.json();
+            // Replace the temporary message with the final one
+            setMessages(prev => 
+              prev.map(msg => 
+                msg.id === aiMessage.id ? finalMessageData : msg
+              )
+            );
           }
         } catch (error) {
           debug('Error: AI chat flow failed -', error);
-          // Remove the streaming message if there was an error
-          if (streamingMessageId) {
-            setMessages(prev => prev.filter(msg => msg.id !== streamingMessageId));
-          }
         } finally {
           setIsBluemanTyping(false);
-          setStreamingMessageId(null);
-          setStreamingMessage('');
         }
       }
     } catch (error) {

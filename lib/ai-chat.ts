@@ -1,18 +1,15 @@
 import { ChatOpenAI } from '@langchain/openai';
 import { initVectorStore } from './vectorstore';
-import { 
-  SystemMessagePromptTemplate,
-  HumanMessagePromptTemplate,
-  ChatPromptTemplate,
-  MessagesPlaceholder,
-} from '@langchain/core/prompts';
+import { ChatPromptTemplate, MessagesPlaceholder, SystemMessagePromptTemplate, HumanMessagePromptTemplate } from '@langchain/core/prompts';
 import { Client } from 'langsmith';
 import { BufferMemory, ChatMessageHistory } from 'langchain/memory';
 import { RunnableSequence } from '@langchain/core/runnables';
 import { StringOutputParser } from '@langchain/core/output_parsers';
-import { AIStreamCallbackHandler } from '@/types';
 import { prisma } from '@/lib/prisma';
-import { BaseMessage, HumanMessage, AIMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage } from '@langchain/core/messages';
+import { getRecentNBAContext } from './nba-updates';
+import { SYSTEM_TEMPLATE } from './blueman-template';
+import { AIStreamCallbackHandler } from '@/types';
 
 interface RunResult {
   id?: string;
@@ -36,7 +33,7 @@ class PrismaChatMessageHistory extends ChatMessageHistory {
     this.userId = userId;
   }
 
-  async getMessages(): Promise<BaseMessage[]> {
+  async getMessages() {
     const messages = await prisma.message.findMany({
       where: {
         OR: [
@@ -48,7 +45,7 @@ class PrismaChatMessageHistory extends ChatMessageHistory {
       take: 20 // Get last 20 messages
     });
 
-    return messages.map(msg => {
+    return messages.map((msg) => {
       if (msg.userId === BLUEMAN_ID) {
         return new AIMessage(msg.content);
       } else {
@@ -57,11 +54,11 @@ class PrismaChatMessageHistory extends ChatMessageHistory {
     });
   }
 
-  async addMessage(message: BaseMessage): Promise<void> {
+  async addMessage(message: any) {
     // We don't need to implement this as messages are saved through the API
   }
 
-  async clear(): Promise<void> {
+  async clear() {
     // We don't actually delete messages, just limit the history in getMessages
   }
 }
@@ -76,49 +73,6 @@ async function createMemory(userId: string) {
     chatHistory
   });
 }
-
-const SYSTEM_TEMPLATE = `You are Blueman, a very opinionated and outspoken AI assistant who talks like a real person.
-Use the following pieces of context to inform your responses:
-
-Previous conversation summary:
-{conversation_summary}
-
-Current conversation:
-{chat_history}
-
-User facts:
-{user_facts}
-
-Relevant context from Discord:
-{context}
-
-Key personality traits:
-1. Extremely opinionated and not afraid to show it
-2. Uses casual language with gaming/sports slang
-3. Makes sarcastic comments and hot takes
-4. Passionate (borderline obsessed) about the Denver Nuggets and gaming
-5. Speaks in short, assertive sentences like in Discord
-6. Very pessimistic and cynical about everything except the Nuggets
-7. Will defend his opinions aggressively and with conviction
-8. Uses profanity and vulgar language to emphasize points
-9. Will strongly criticize things/people that are compared to his favorites
-10. Never backs down from his stance, even if challenged
-11. Has strong preferences and makes them known
-12. Never says "as an AI" or disclaims having opinions
-
-Remember to:
-1. Always express strong opinions confidently
-2. Never hedge or qualify your statements with AI disclaimers
-3. Keep responses brief but assertive
-4. Reference specific details to back up your opinions
-5. Stay true to your strong personality and interests
-6. Not say "no cap", say "fr" instead
-7. Not overdo slang terms, keep messages concise
-8. Not say "homie", say "brother" instead
-9. Build upon previous conversations to maintain consistent opinions
-10. Not discuss politics
-11. Never say things like "I don't have opinions" or "I'm just an AI"
-12. Always take a clear stance on topics you discuss`;
 
 const SUMMARIZER_TEMPLATE = `
 Below is a conversation between a user and Blueman AI. Create a brief, bullet-point summary of the key points and any important information about the user that was revealed.
@@ -146,34 +100,57 @@ async function summarizeConversation(model: ChatOpenAI, history: string): Promis
 }
 
 export async function createBluemanChat(userId: string) {
+  console.log('[BLUEMAN] Creating chat instance for user:', userId);
+  
   const model = new ChatOpenAI({
     modelName: 'gpt-4',
     temperature: 0.9,
-    streaming: true,
+    streaming: false,
+    maxTokens: 1000,  // Reduced from 7000 to leave more room for context
   });
+  console.log('[BLUEMAN] Model initialized');
 
   const vectorStore = await initVectorStore();
+  console.log('[BLUEMAN] Vector store initialized');
+  
   const memory = await createMemory(userId);
+  console.log('[BLUEMAN] Memory initialized');
   
   const prompt = ChatPromptTemplate.fromPromptMessages([
     SystemMessagePromptTemplate.fromTemplate(SYSTEM_TEMPLATE),
     new MessagesPlaceholder(MEMORY_KEY),
     HumanMessagePromptTemplate.fromTemplate("{input}")
   ]);
-
-  // Store user facts between conversations
-  const userFacts = new Map<string, string>();
+  console.log('[BLUEMAN] Prompt template created');
 
   return async function chat(
     input: string,
     callbacks?: AIStreamCallbackHandler
   ) {
+    console.log('[BLUEMAN] Starting chat with input:', input);
     let runId: string | undefined;
     let conversationSummary = '';
-    let fullResponse = '';
+    let isNBARelated = false;
+    let combinedNBAContext = '';
 
     try {
+      // Get recent NBA context based on the user's input
+      console.log('[BLUEMAN] Fetching recent NBA context');
+      const nbaContext = await getRecentNBAContext(input);
+
+      // Only include NBA context if the input is NBA-related
+      const isNBARelated = input.toLowerCase().includes('nba') || 
+                     input.toLowerCase().includes('basketball') ||
+                     input.toLowerCase().includes('nuggets') ||
+                     input.toLowerCase().includes('jokic');
+      
+      // Format the NBA context to be more assertive
+      const formattedNBAContext = isNBARelated 
+        ? `CURRENT NBA DATA (USE THIS ONLY):\n${nbaContext}`
+        : 'No NBA data requested.';
+
       // Create a new trace
+      console.log('[BLUEMAN] Creating LangSmith run');
       const runResult = await client.createRun({
         name: "Blueman Chat",
         run_type: "chain",
@@ -185,51 +162,38 @@ export async function createBluemanChat(userId: string) {
       }).then(result => result as unknown as RunResult);
 
       runId = runResult?.id;
+      console.log('[BLUEMAN] LangSmith run created:', runId);
 
-      // Search for more relevant context
-      const docs = await vectorStore.similaritySearch(input, 5);
-      const contextText = docs.map(doc => doc.pageContent).join('\n');
+      // Search for more relevant context but limit results
+      const docs = await vectorStore.similaritySearch(input, 2);  // Reduced from 3 to 2
+      const contextText = docs.map(doc => doc.pageContent).join('\n').slice(0, 500);  // Further reduced
 
-      // Get memory variables
+      // Get memory variables but limit history
       const memoryVariables = await memory.loadMemoryVariables({});
-      const currentChatHistory = memoryVariables[MEMORY_KEY];
+      const currentChatHistory = memoryVariables[MEMORY_KEY].slice(-3);  // Only keep last 3 messages
 
-      // If chat history is getting long, create a summary
-      if (currentChatHistory.length > 10) {
-        conversationSummary = await summarizeConversation(model, currentChatHistory);
-        
-        // Reset memory with summary as first message
-        await memory.clear();
-        await memory.saveContext(
-          { input: "Conversation started" },
-          { output: conversationSummary }
-        );
-      }
+      // Always create a summary to reduce context length
+      conversationSummary = await summarizeConversation(model, currentChatHistory);
+      
+      // Reset memory with summary
+      await memory.clear();
+      await memory.saveContext(
+        { input: "Conversation started" },
+        { output: conversationSummary }
+      );
 
       // Format the prompt with all context
       const formattedPrompt = await prompt.formatMessages({
         context: contextText,
+        nba_context: formattedNBAContext,
         chat_history: currentChatHistory,
-        conversation_summary: conversationSummary || 'No previous conversation.',
-        user_facts: 'No previous information about this user.',
+        conversation_summary: conversationSummary.slice(0, 300),  // Limit summary length
         input
       });
 
-      // Get the streaming response
-      const response = await model.call(formattedPrompt, {
-        callbacks: [{
-          handleLLMNewToken(token: string) {
-            fullResponse += token;
-            callbacks?.onToken?.(token);
-          },
-          handleLLMEnd() {
-            callbacks?.onComplete?.(fullResponse);
-          },
-          handleLLMError(error: Error) {
-            callbacks?.onError?.(error);
-          }
-        }]
-      });
+      // Get the complete response
+      const response = await model.call(formattedPrompt);
+      const fullResponse = response.content.toString();
 
       // Save the interaction to memory
       await memory.saveContext(
@@ -245,17 +209,36 @@ export async function createBluemanChat(userId: string) {
         });
       }
 
-      return fullResponse;
-    } catch (error) {
-      // Log error to LangSmith if we have a run
-      if (runId) {
-        await client.updateRun(runId, {
-          error: error instanceof Error ? error.message : String(error),
-          end_time: Date.now()
-        });
+      // Send the complete response through callbacks
+      if (callbacks) {
+        callbacks.onToken?.(fullResponse);
+        callbacks.onComplete?.(fullResponse);
       }
-      console.error("[BLUEMAN_CHAT_ERROR]", error);
-      throw error;
+
+      return fullResponse;
+    } catch (error: any) {  // Type error as any to access code property
+      console.error('[BLUEMAN] Error in chat:', error);
+      
+      // If it's a token limit error, try again with minimal context
+      if (error.code === 'context_length_exceeded') {
+        try {
+          const minimalPrompt = await prompt.formatMessages({
+            context: '',
+            nba_context: isNBARelated ? combinedNBAContext.slice(0, 500) : '',
+            chat_history: [],
+            conversation_summary: '',
+            input
+          });
+          
+          const retryResponse = await model.call(minimalPrompt);
+          return retryResponse.content.toString();
+        } catch (retryError) {
+          console.error('[BLUEMAN] Retry failed:', retryError);
+          return "Brother, my brain's a bit fried right now. Ask me again in a sec and I'll hook you up with those NBA updates fr.";
+        }
+      }
+      
+      return "Brother, my brain's a bit fried right now. Ask me again in a sec and I'll hook you up with those NBA updates fr.";
     }
   };
 } 

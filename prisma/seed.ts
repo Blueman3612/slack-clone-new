@@ -87,27 +87,23 @@ async function main() {
 
     console.log('Migration completed successfully!');
 
-    // Create or update Blueman AI user
-    console.log('Creating Blueman AI user...');
+    // Create Blueman AI user if it doesn't exist
     const blueman = await prisma.user.upsert({
-      where: { email: 'blueman@ai.local' },
-      update: {
-        name: 'Blueman AI',
-        isAI: true,
-        aiModel: 'blueman',
-        image: '/ai-avatars/blueman.png',
-        role: 'AI'
+      where: {
+        id: 'cm5vmlcru0001ujjcqeqz5743'
       },
+      update: {},
       create: {
+        id: 'cm5vmlcru0001ujjcqeqz5743',
         name: 'Blueman AI',
-        email: 'blueman@ai.local',
-        role: 'AI',
+        email: 'blueman@gauntlet.ai',
         isAI: true,
         aiModel: 'blueman',
-        image: '/ai-avatars/blueman.png',
-        hashedPassword: await bcrypt.hash('blueman-ai', 12)
+        role: 'AI'
       }
     });
+
+    console.log('Created Blueman AI user:', blueman);
 
     // Add Blueman AI to the General Server
     const server = await prisma.server.findFirst({
