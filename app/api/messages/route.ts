@@ -105,6 +105,12 @@ export async function POST(request: Request) {
       if (shouldRespond && channelId) {
         console.log('Getting Blueman response for channel:', channelId);
         
+        // Get the user's name for the @ mention
+        const user = await prisma.user.findUnique({
+          where: { id: messageUserId },
+          select: { name: true }
+        });
+
         // Start typing indicator
         const channelName = `presence-channel-${channelId}`;
         await pusherServer.trigger(channelName, 'client-typing', {
@@ -112,11 +118,12 @@ export async function POST(request: Request) {
           name: 'Blueman AI'
         });
         
-        // Get Blueman's response
+        // Get Blueman's response and add @ mention
         const bluemanResponse = await getBluemanResponse(content, channelId);
-        console.log('Blueman response:', bluemanResponse ? 'Generated' : 'None');
+        const responseWithMention = bluemanResponse ? `@${user?.name} ${bluemanResponse}` : null;
+        console.log('Blueman response:', responseWithMention ? 'Generated' : 'None');
         
-        if (bluemanResponse) {
+        if (responseWithMention) {
           // Schedule Blueman's response
           const delay = Math.random() * 2000 + 1000;
           console.log(`Scheduling Blueman response with ${delay}ms delay`);
@@ -132,7 +139,7 @@ export async function POST(request: Request) {
               console.log('Creating Blueman response message');
               const response = await prisma.message.create({
                 data: {
-                  content: bluemanResponse,
+                  content: responseWithMention,
                   userId: BLUEMAN_ID,
                   channelId
                 },

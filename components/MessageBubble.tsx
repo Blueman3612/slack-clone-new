@@ -168,20 +168,33 @@ export default function MessageBubble({
       );
     }
 
-    const highlightedContent = searchQuery
-      ? initialMessage.content.replace(
-          new RegExp(`(${searchQuery})`, 'gi'),
-          '<mark class="bg-yellow-300 text-black">$1</mark>'
-        )
-      : initialMessage.content;
+    if (searchQuery) {
+      return highlightText(initialMessage.content, searchQuery);
+    }
+
+    // Handle user mentions
+    const mentionRegex = /@(\w+)/g;
+    const parts = initialMessage.content.split(mentionRegex);
+    
+    if (parts.length === 1) {
+      return <div className="whitespace-pre-wrap break-words">{initialMessage.content}</div>;
+    }
 
     return (
       <div className="whitespace-pre-wrap break-words">
-        {searchQuery ? (
-          <div dangerouslySetInnerHTML={{ __html: highlightedContent }} />
-        ) : (
-          initialMessage.content
-        )}
+        {parts.map((part, index) => {
+          if (index % 2 === 1) { // This is a mention
+            return (
+              <span 
+                key={index} 
+                className="text-blue-500 hover:underline cursor-pointer font-medium"
+              >
+                @{part}
+              </span>
+            );
+          }
+          return part;
+        })}
       </div>
     );
   };

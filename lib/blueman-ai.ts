@@ -1,10 +1,14 @@
 import { prisma } from './prisma';
 import { getNBAContext } from './nba-knowledge';
 import { NewsArticle } from '@prisma/client';
-import { ChatOpenAI } from '@langchain/openai';
+import OpenAI from 'openai';
 import { SystemMessage, HumanMessage } from '@langchain/core/messages';
 import { env } from '@/lib/env';
 import { SYSTEM_TEMPLATE } from '@/lib/blueman-template';
+
+const openai = new OpenAI({
+  apiKey: env.OPENAI_API_KEY
+});
 
 interface MessageContext {
   recentMessages: string[];
@@ -29,6 +33,24 @@ const TRIGGER_KEYWORDS = [
   'ant', 'anthony edwards', 'edwards', 'jokic', 'murray',
   'lebron', 'curry', 'doncic', 'giannis', 'embiid'
 ];
+
+// Add NBA-related keywords for filtering
+const NBA_KEYWORDS = [
+  'nba', 'basketball', 'playoffs', 'finals', 'all-star',
+  'timberwolves', 'wolves', 'lakers', 'celtics', 'warriors',
+  'anthony edwards', 'lebron', 'curry', 'durant', 'jokic',
+  'dunk', 'three-pointer', 'triple-double', 'double-double',
+  'eastern conference', 'western conference', 'commissioner',
+  'draft', 'trade', 'free agency', 'contract', 'roster'
+];
+
+// Filter articles for NBA content
+const filterNBAArticles = (articles: any[]) => {
+  return articles.filter(article => {
+    const content = (article.title + ' ' + article.description).toLowerCase();
+    return NBA_KEYWORDS.some(keyword => content.includes(keyword.toLowerCase()));
+  });
+};
 
 // Function to check if Blueman should respond to a message
 export async function shouldBluemanRespond(message: string): Promise<boolean> {
@@ -61,93 +83,68 @@ export async function shouldBluemanRespond(message: string): Promise<boolean> {
 // Function to get Blueman's response to a message
 export async function getBluemanResponse(message: string, channelId: string): Promise<string | null> {
   try {
-    // Get recent channel context
-    const recentMessages = await prisma.message.findMany({
+    // Fetch articles
+    const articlesResponse = await fetch('http://localhost:3000/api/articles');
+    if (!articlesResponse.ok) throw new Error('Failed to fetch articles');
+    const articles = await articlesResponse.json();
+
+    // Filter for NBA-related articles
+    const nbaArticles = filterNBAArticles(articles);
+    console.log(`Found ${nbaArticles.length} NBA-related articles out of ${articles.length} total`);
+
+    // Format the articles for the context
+    const articlesContext = nbaArticles
+      .slice(0, 5) // Use top 5 NBA-related articles
+      .map(article => `${article.title}: ${article.description}`)
+      .join('\n');
+
+    // Get the chat history
+    const messages = await prisma.message.findMany({
       where: {
         channelId,
         createdAt: {
-          gte: new Date(Date.now() - 5 * 60 * 1000) // Last 5 minutes
+          gte: new Date(Date.now() - 1000 * 60 * 60) // Last hour
         }
       },
       orderBy: {
         createdAt: 'asc'
       },
+      take: 10,
       include: {
         user: {
           select: {
             name: true
           }
         }
-      },
-      take: 10
+      }
     });
 
-    const context: MessageContext = {
-      recentMessages: recentMessages.map(msg => 
-        `${msg.user.name}: ${msg.content}`
-      )
-    };
+    // Format the chat context
+    const chatContext = messages
+      .map(msg => `${msg.user.name}: ${msg.content}`)
+      .join('\n');
 
-    // Get NBA context
-    context.nbaContext = await getNBAContext(message);
-    console.log('NBA Context:', context.nbaContext);
+    const systemMessage = `You are Blueman AI, a knowledgeable and enthusiastic NBA fan assistant.
+You have access to recent NBA news and chat context to help you engage in natural conversations.
+Keep your responses conversational, engaging, and focused on basketball.
+Use your knowledge of NBA history, players, and current events to provide insightful comments.
+Recent NBA News:
+${articlesContext}
 
-    // Get news context
-    const newsArticles = await prisma.newsArticle.findMany({
-      orderBy: {
-        publishedAt: 'desc'
-      },
-      take: 15
-    });
+Recent Chat Context:
+${chatContext}`;
 
-    if (newsArticles.length > 0) {
-      context.newsContext = newsArticles.map(article => {
-        const date = article.publishedAt.toLocaleDateString('en-US', {
-          weekday: 'short',
-          month: 'short',
-          day: 'numeric'
-        });
-        return `[${date}] ${article.title}\n${article.description || ''}`;
-      }).join('\n\n');
-    }
-
-    console.log('Preparing Blueman response with context:', {
-      messageLength: message.length,
-      recentMessagesCount: context.recentMessages.length,
-      hasNBAContext: !!context.nbaContext,
-      hasNewsContext: !!context.newsContext
-    });
-
-    // Initialize the AI model
-    const model = new ChatOpenAI({
-      modelName: 'gpt-4',
+    const aiResponse = await openai.chat.completions.create({
+      model: "gpt-4-turbo-preview",
+      messages: [
+        { role: "system", content: systemMessage },
+        { role: "user", content: message }
+      ],
       temperature: 0.7,
-      openAIApiKey: env.OPENAI_API_KEY,
-      streaming: false
+      max_tokens: 150
     });
 
-    // Create the system message with the template
-    const systemMessage = new SystemMessage({
-      content: SYSTEM_TEMPLATE
-        .replace('{nba_context}', context.nbaContext || 'No NBA data available.')
-        .replace('{news_context}', context.newsContext || 'No recent news available.')
-        .replace('{context}', '')
-        .replace('{conversation_summary}', '')
-        .replace('{chat_history}', context.recentMessages.join('\n'))
-    });
-
-    // Create the user's message
-    const userMessage = new HumanMessage({
-      content: message
-    });
-
-    console.log('Sending request to AI model');
-    
-    // Get the complete response
-    const response = await model.invoke([systemMessage, userMessage]);
-    console.log('Got AI response');
-    
-    return response.content.toString();
+    return aiResponse.choices[0]?.message?.content || null;
   } catch (error) {
     console.error('Error in getBluemanResponse:', error);
     return null;

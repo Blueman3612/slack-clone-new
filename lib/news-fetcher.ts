@@ -1,8 +1,57 @@
 import { prisma } from './prisma';
 
 const NEWS_API_KEY = process.env.NEWS_API_KEY;
-const NBA_KEYWORDS = ['NBA', 'basketball', 'Lakers', 'Warriors', 'Celtics', 'Bulls', 'Heat'];
-const HOURS_TO_STORE = 24; // Store articles for 24 hours
+
+// Strong NBA indicators that almost certainly mean it's an NBA article
+const STRONG_NBA_INDICATORS = [
+  'nba', 'national basketball association',
+  'basketball', 'nba basketball'
+];
+
+// Team names that should be accompanied by basketball context
+const NBA_TEAMS = [
+  'hawks', 'celtics', 'nets', 'hornets', 'bulls', 'cavaliers', 'mavericks', 
+  'nuggets', 'pistons', 'warriors', 'rockets', 'pacers', 'clippers', 'lakers', 
+  'grizzlies', 'heat', 'bucks', 'timberwolves', 'pelicans', 'knicks', 'thunder', 
+  'magic', '76ers', 'sixers', 'suns', 'blazers', 'kings', 'spurs', 'raptors', 
+  'jazz', 'wizards'
+];
+
+// Basketball-specific terms that help confirm it's about NBA
+const BASKETBALL_TERMS = [
+  'point guard', 'shooting guard', 'small forward', 'power forward', 'center',
+  'three-pointer', '3-pointer', 'dunk', 'slam dunk', 'alley-oop',
+  'free throw', 'rebound', 'assist', 'block', 'steal',
+  'playoffs', 'finals', 'all-star', 'all star game',
+  'triple-double', 'double-double', 'statline',
+  'commissioner', 'adam silver'
+];
+
+// Helper function to check if content is NBA-related with stricter rules
+const isNBARelated = (content: string): boolean => {
+  const lowercaseContent = content.toLowerCase();
+  
+  // First check for strong NBA indicators
+  const hasStrongIndicator = STRONG_NBA_INDICATORS.some(term => 
+    lowercaseContent.includes(term.toLowerCase())
+  );
+
+  if (hasStrongIndicator) {
+    return true;
+  }
+
+  // Check for team names with basketball context
+  const hasTeamMention = NBA_TEAMS.some(team => 
+    lowercaseContent.includes(team.toLowerCase())
+  );
+
+  const hasBasketballTerm = BASKETBALL_TERMS.some(term => 
+    lowercaseContent.includes(term.toLowerCase())
+  );
+
+  // Require both a team mention and a basketball term for non-obvious cases
+  return hasTeamMention && hasBasketballTerm;
+};
 
 export async function fetchAndStoreNBANews() {
   if (!NEWS_API_KEY) {
@@ -11,76 +60,93 @@ export async function fetchAndStoreNBANews() {
   }
 
   try {
-    console.log('Fetching NBA news with keywords:', NBA_KEYWORDS.join(', '));
+    console.log('Fetching NBA news...');
     
-    const url = `https://newsapi.org/v2/everything?` +
-      `q=${encodeURIComponent(NBA_KEYWORDS.join(' OR '))}` +
-      `&language=en` +
-      `&sortBy=publishedAt` +
-      `&pageSize=100`;
-      
-    console.log('Requesting URL:', url);
+    // Clear all existing articles first
+    const deleteResult = await prisma.newsArticle.deleteMany({});
+    console.log(`Cleared ${deleteResult.count} existing articles`);
 
-    const response = await fetch(url, {
-      headers: {
-        'X-Api-Key': NEWS_API_KEY
-      }
-    });
+    // Fetch articles in batches with more specific queries
+    const batches = [
+      'nba AND (basketball OR playoffs OR finals)',
+      'national basketball association',
+      'nba basketball',
+      NBA_TEAMS.slice(0, 10).join(' OR ') + ' AND (nba OR basketball)',
+      NBA_TEAMS.slice(10, 20).join(' OR ') + ' AND (nba OR basketball)',
+      NBA_TEAMS.slice(20).join(' OR ') + ' AND (nba OR basketball)'
+    ];
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('News API Error:', {
-        status: response.status,
-        statusText: response.statusText,
-        body: errorText
-      });
-      throw new Error(`News API responded with status: ${response.status} - ${errorText}`);
-    }
+    let allArticles = [];
+    for (const query of batches) {
+      const url = `https://newsapi.org/v2/everything?` +
+        `q=${encodeURIComponent(query)}` +
+        `&language=en` +
+        `&sortBy=publishedAt` +
+        `&pageSize=100`;
+        
+      console.log('Requesting URL:', url);
 
-    const data = await response.json();
-    console.log(`Fetched ${data.articles?.length || 0} articles`);
-    
-    if (!data.articles || !Array.isArray(data.articles)) {
-      console.error('Unexpected API response:', data);
-      throw new Error('Invalid response format from News API');
-    }
-
-    // Delete old articles
-    const deleteResult = await prisma.newsArticle.deleteMany({
-      where: {
-        createdAt: {
-          lt: new Date(Date.now() - HOURS_TO_STORE * 60 * 60 * 1000)
+      const response = await fetch(url, {
+        headers: {
+          'X-Api-Key': NEWS_API_KEY
         }
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('News API Error:', {
+          status: response.status,
+          statusText: response.statusText,
+          body: errorText
+        });
+        continue;
       }
+
+      const data = await response.json();
+      if (data.articles && Array.isArray(data.articles)) {
+        // Pre-filter articles before adding to the pool
+        const nbaArticles = data.articles.filter(article => 
+          isNBARelated(article.title + ' ' + (article.description || ''))
+        );
+        allArticles.push(...nbaArticles);
+      }
+    }
+
+    console.log(`Fetched ${allArticles.length} total NBA-related articles`);
+
+    // Remove duplicates
+    const seen = new Set();
+    const uniqueArticles = allArticles.filter(article => {
+      const key = `${article.title}-${article.publishedAt}`;
+      const isDuplicate = seen.has(key);
+      seen.add(key);
+      return !isDuplicate && article.title && article.url;
     });
-    console.log(`Deleted ${deleteResult.count} old articles`);
 
-    // Store new articles one by one to handle duplicates
-    const articles = data.articles.map((article: any) => ({
-      title: article.title || 'No Title',
-      description: article.description,
-      content: article.content,
-      url: article.url,
-      publishedAt: new Date(article.publishedAt),
-      source: article.source?.name || 'Unknown Source',
-    }));
+    console.log(`Filtered to ${uniqueArticles.length} unique NBA articles`);
 
-    // Create articles one by one, skipping duplicates
+    // Store unique articles
     let createdCount = 0;
-    for (const article of articles) {
+    for (const article of uniqueArticles) {
       try {
         await prisma.newsArticle.create({
-          data: article
+          data: {
+            title: article.title || 'No Title',
+            description: article.description,
+            content: article.content,
+            url: article.url,
+            publishedAt: new Date(article.publishedAt),
+            source: article.source?.name || 'Unknown Source',
+          }
         });
         createdCount++;
       } catch (error) {
-        // Skip duplicate entries
-        console.log('Skipping duplicate article:', article.title);
+        console.log('Error storing article:', article.title, error);
       }
     }
     
-    console.log(`Stored ${createdCount} new articles`);
-    return articles;
+    console.log(`Successfully stored ${createdCount} new NBA articles`);
+    return uniqueArticles;
   } catch (error) {
     console.error('Detailed error in fetchAndStoreNBANews:', error);
     if (error instanceof Error) {
